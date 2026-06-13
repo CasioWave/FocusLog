@@ -1,0 +1,154 @@
+/* Minimalist Flat Theme Variables */
+
+:root {
+  /* Default base hue for primary color (Blue = 210) */
+  --hue-primary: 210;
+  --sat-primary: 70%;
+
+  /* Dark mode is default */
+  color-scheme: dark;
+
+  /* Dynamically generated primary colors using HSL */
+  --md-sys-color-primary: hsl(var(--hue-primary), var(--sat-primary), 60%);
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: hsl(var(--hue-primary), var(--sat-primary), 20%);
+  --md-sys-color-on-primary-container: hsl(var(--hue-primary), var(--sat-primary), 80%);
+  
+  --md-sys-color-secondary: hsl(var(--hue-primary), 20%, 60%);
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: hsl(var(--hue-primary), 20%, 15%);
+  --md-sys-color-on-secondary-container: hsl(var(--hue-primary), 20%, 85%);
+  
+  --md-sys-color-error: #ff6b6b;
+  --md-sys-color-on-error: #ffffff;
+  
+  /* Core Background and Surfaces - Ultra Dark */
+  --md-sys-color-background: #0f0f11;
+  --md-sys-color-on-background: #e1e1e3;
+  --md-sys-color-surface: #0f0f11; /* Same as background for flat look */
+  --md-sys-color-on-surface: #e1e1e3;
+  --md-sys-color-surface-variant: #1a1a1d; /* Slightly lighter for inputs/highlights */
+  --md-sys-color-on-surface-variant: #a0a0a5;
+  --md-sys-color-outline: #2a2a2e;
+  
+  --md-sys-color-grid: rgba(255, 255, 255, 0.03);
+
+  /* Flattened Elevations - No Shadows */
+  --md-sys-elevation-1: none;
+  --md-sys-elevation-2: none;
+  --md-sys-elevation-3: none;
+
+  --md-sys-shape-corner-extra-small: 4px;
+  --md-sys-shape-corner-small: 8px;
+  --md-sys-shape-corner-medium: 12px;
+  --md-sys-shape-corner-large: 24px;
+  --md-sys-shape-corner-full: 9999px;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  
+  --md-sys-color-primary: hsl(var(--hue-primary), var(--sat-primary), 45%);
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: hsl(var(--hue-primary), var(--sat-primary), 90%);
+  --md-sys-color-on-primary-container: hsl(var(--hue-primary), var(--sat-primary), 20%);
+  
+  --md-sys-color-secondary: hsl(var(--hue-primary), 30%, 50%);
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: hsl(var(--hue-primary), 30%, 90%);
+  --md-sys-color-on-secondary-container: hsl(var(--hue-primary), 30%, 20%);
+  
+  --md-sys-color-error: #d32f2f;
+  --md-sys-color-on-error: #ffffff;
+  
+  --md-sys-color-background: #fafafa;
+  --md-sys-color-on-background: #121212;
+  --md-sys-color-surface: #fafafa;
+  --md-sys-color-on-surface: #121212;
+  --md-sys-color-surface-variant: #f0f0f0;
+  --md-sys-color-on-surface-variant: #5f5f5f;
+  --md-sys-color-outline: #e0e0e0;
+  
+  --md-sys-color-grid: rgba(0, 0, 0, 0.04);
+}
+
+/* Base Styles & Transitions */
+body {
+  background-color: var(--md-sys-color-background);
+  color: var(--md-sys-color-on-background);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-weight: 500;
+}
+
+/* ================== COMPONENTS ================== */
+
+.md-button {
+  background-color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  border: none;
+  border-radius: var(--md-sys-shape-corner-full);
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  transform: translateY(0);
+}
+
+.md-button:hover {
+  filter: brightness(1.15);
+}
+
+.md-button:active {
+  filter: brightness(0.9);
+}
+
+.md-button-secondary {
+  background-color: var(--md-sys-color-surface-variant);
+  color: var(--md-sys-color-on-surface);
+}
+.md-button-secondary:hover {
+  background-color: var(--md-sys-color-outline);
+}
+
+/* Redefined card to be flat and minimalist */
+.md-card {
+  background-color: transparent;
+  color: var(--md-sys-color-on-surface);
+  border-radius: var(--md-sys-shape-corner-medium);
+  padding: 24px;
+  border: 1px solid var(--md-sys-color-outline);
+  transition: border-color 0.2s ease;
+}
+
+.md-card:hover {
+  border-color: var(--md-sys-color-primary-container);
+}
+
+/* Fonts */
+.mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.timer-active-card {
+  animation: fadeIn 0.4s ease;
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.modal-content {
+  animation: slideDown 0.3s ease;
+  background-color: var(--md-sys-color-surface-variant); /* Ensures modal sits above grid cleanly */
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: var(--md-sys-shape-corner-medium);
+}
