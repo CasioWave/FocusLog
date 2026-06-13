@@ -59,7 +59,7 @@ export default function MeditationTimer({ refreshKey, config }) {
         if (audioRef.current) { audioRef.current.pause(); }
         
         // Show post-session modal if we were tracking it
-        if (elapsed > 0 && !showPostModal) {
+        if (elapsed > 0 && !showPostModal && state.finishingDevice === socket.id) {
           const expectedSecs = state.sessionData.duration * 60;
           setIsEarly(elapsed < expectedSecs - 5);
           setShowPostModal(true);

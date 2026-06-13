@@ -58,6 +58,7 @@ export default function Timer({ refreshKey }) {
   const [smartBreakPrompted, setSmartBreakPrompted] = useState(false);
   const [showSmartToast, setShowSmartToast] = useState(false);
   const [allSessions, setAllSessions] = useState([]);
+  const [finishingDevice, setFinishingDevice] = useState(null);
 
   const socketRef = useRef(null);
   const timerRef = useRef(null);
@@ -153,6 +154,7 @@ export default function Timer({ refreshKey }) {
       setSessionState(serverState.state);
       setSessionData(serverState.sessionData);
       setDistractions(serverState.distractions);
+      setFinishingDevice(serverState.finishingDevice);
 
       if (serverState.state === 'running' && serverState.startTime) {
         const elapsed = Math.floor((Date.now() - serverState.startTime) / 1000);
@@ -212,22 +214,24 @@ export default function Timer({ refreshKey }) {
   
   useEffect(() => {
      if (sessionState === 'finished' && sessionData) {
-         audioController.stopBell();
-         audioController.playBell(true); 
-         if (timeElapsed < 300) {
-             const tm = setTimeout(() => {
-                 socketRef.current.emit('finalizeSession', 0);
-             }, 4000);
-             return () => clearTimeout(tm);
-         } else {
-             setPendingSessionData({ endTime: new Date().toISOString(), actualElapsedSeconds: timeElapsed });
-             setShowPostModal(true);
-             if ("Notification" in window && Notification.permission === "granted") {
-                 new Notification("FocusLog", { body: `Session Complete: ${sessionData.goal}` });
+         if (socketRef.current && socketRef.current.id === finishingDevice) {
+             audioController.stopBell();
+             audioController.playBell(true); 
+             if (timeElapsed < 300) {
+                 const tm = setTimeout(() => {
+                     socketRef.current.emit('finalizeSession', 0);
+                 }, 4000);
+                 return () => clearTimeout(tm);
+             } else {
+                 setPendingSessionData({ endTime: new Date().toISOString(), actualElapsedSeconds: timeElapsed });
+                 setShowPostModal(true);
+                 if ("Notification" in window && Notification.permission === "granted") {
+                     new Notification("FocusLog", { body: `Session Complete: ${sessionData.goal}` });
+                 }
              }
          }
      }
-  }, [sessionState]);
+  }, [sessionState, sessionData, finishingDevice, timeElapsed]);
 
   const handleBreakFinish = () => {
     socketRef.current.emit('endBreak');

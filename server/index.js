@@ -108,6 +108,7 @@ let globalTimerState = {
   state: 'idle', // 'idle', 'running', 'break', 'finished'
   mode: 'focus', // 'focus' or 'meditation'
   initiator: null, // to track which device started it for local sound
+  finishingDevice: null,
   sessionData: null,
   startTime: null,
   distractions: [],
@@ -134,6 +135,7 @@ io.on('connection', (socket) => {
       state: 'running',
       mode: data.mode || 'focus',
       initiator: socket.id,
+      finishingDevice: null,
       sessionData: data,
       startTime: Date.now(),
       distractions: [],
@@ -153,6 +155,7 @@ io.on('connection', (socket) => {
   socket.on('stopEarly', () => {
     if (globalTimerState.state === 'running') {
       globalTimerState.state = 'finished';
+      globalTimerState.finishingDevice = socket.id;
       io.emit('sync', globalTimerState);
     }
   });
@@ -160,6 +163,7 @@ io.on('connection', (socket) => {
   socket.on('finishCountdown', () => {
     if (globalTimerState.state === 'running' && globalTimerState.sessionData.type === 'countdown') {
       globalTimerState.state = 'finished';
+      globalTimerState.finishingDevice = globalTimerState.initiator;
       io.emit('sync', globalTimerState);
     }
   });
@@ -177,6 +181,7 @@ io.on('connection', (socket) => {
         state: 'idle',
         mode: 'focus',
         initiator: null,
+        finishingDevice: null,
         sessionData: null,
         startTime: null,
         distractions: [],
@@ -193,6 +198,7 @@ io.on('connection', (socket) => {
         state: 'idle',
         mode: 'focus',
         initiator: null,
+        finishingDevice: null,
         sessionData: null,
         startTime: null,
         distractions: [],
