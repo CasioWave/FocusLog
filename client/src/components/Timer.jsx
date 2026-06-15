@@ -7,6 +7,7 @@ import { audioController } from '../utils/AudioController';
 import { calculateFatigueCurve } from '../utils/AnalyticsEngine';
 import { io } from 'socket.io-client';
 import Heatmap from './Heatmap';
+import { getDeviceId } from '../utils/deviceId';
 
 const computeSFI = (startTime, endTime, distractions) => {
   const tStart = new Date(startTime).getTime();
@@ -55,6 +56,7 @@ export default function Timer({ refreshKey }) {
   const [weeklyData, setWeeklyData] = useState({ totalTime: 0, consistency: 0 });
   const [bestStats, setBestStats] = useState({ bestSFI: 0, longestSession: 0, bestDaily: 0 });
   const [peakBin, setPeakBin] = useState(null);
+  const [enduranceLimit, setEnduranceLimit] = useState(25);
   const [smartBreakPrompted, setSmartBreakPrompted] = useState(false);
   const [showSmartToast, setShowSmartToast] = useState(false);
   const [allSessions, setAllSessions] = useState([]);
@@ -127,12 +129,13 @@ export default function Timer({ refreshKey }) {
         if (val >= (conf.weeklyTargetMinutes || 1200)) consistencyWeeksMet++;
       });
 
-      const { peakBin } = calculateFatigueCurve(allData.sessions);
+      const { peakBin, enduranceLimit } = calculateFatigueCurve(allData.sessions);
 
       setTodaysData({ totalTime: todayTotal, tagsTime: tagsTotal });
       setWeeklyData({ totalTime: weekTotal, consistency: consistencyWeeksMet });
       setBestStats({ bestSFI, longestSession, bestDaily });
       setPeakBin(peakBin);
+      setEnduranceLimit(enduranceLimit);
 
     } catch (e) {
       console.error(e);
@@ -196,7 +199,7 @@ export default function Timer({ refreshKey }) {
         } else if (sessionData?.type === 'countdown') {
           setTimeRemaining((prev) => {
             if (prev <= 1) {
-              socketRef.current.emit('finishCountdown');
+              socketRef.current.emit('finishCountdown', { deviceId: getDeviceId() });
               return 0;
             }
             return prev - 1;
@@ -214,7 +217,7 @@ export default function Timer({ refreshKey }) {
   
   useEffect(() => {
      if (sessionState === 'finished' && sessionData) {
-         if (socketRef.current && socketRef.current.id === finishingDevice) {
+         if (socketRef.current && getDeviceId() === finishingDevice) {
              audioController.stopBell();
              audioController.playBell(true); 
              if (timeElapsed < 300) {
@@ -242,17 +245,19 @@ export default function Timer({ refreshKey }) {
   };
 
   useEffect(() => {
-    if (sessionState === 'running' && config.smartBreakPrompts && peakBin && !smartBreakPrompted) {
-      if (Math.floor(timeElapsed / 60) === peakBin.binStart && peakBin.binStart > 0) {
+    if (sessionState === 'running' && config.smartBreakPrompts && !smartBreakPrompted) {
+      const promptMinute = Math.max(5, Math.floor(enduranceLimit) - 5);
+      
+      if (Math.floor(timeElapsed / 60) === promptMinute) {
         setSmartBreakPrompted(true);
         setShowSmartToast(true);
         if ("Notification" in window && Notification.permission === "granted") {
-           new Notification("Smart Break", { body: `You usually lose focus around now. Consider a 5 min break!` });
+           new Notification("Smart Break", { body: `Your focus usually drops soon. Preemptive 5 min break?` });
         }
         setTimeout(() => setShowSmartToast(false), 10000);
       }
     }
-  }, [timeElapsed, sessionState, config.smartBreakPrompts, peakBin, smartBreakPrompted]);
+  }, [timeElapsed, sessionState, config.smartBreakPrompts, enduranceLimit, smartBreakPrompted]);
 
   const handleStartRequest = () => setShowPreModal(true);
 
@@ -263,7 +268,7 @@ export default function Timer({ refreshKey }) {
     if (audioMode === 'interval') audioController.startIntervalBell(intervalMins);
     if (audioMode === 'random') audioController.startRandomBell(randomMin, randomMax);
     
-    socketRef.current.emit('startSession', startConfig);
+    socketRef.current.emit('startSession', { ...startConfig, deviceId: getDeviceId() });
   };
 
   const finalizeSession = async (notes, breakDuration) => {
@@ -295,7 +300,7 @@ export default function Timer({ refreshKey }) {
   };
 
   const stopEarly = () => {
-      socketRef.current.emit('stopEarly');
+      socketRef.current.emit('stopEarly', { deviceId: getDeviceId() });
   };
 
   const handleDistractionLog = (data) => {
@@ -386,7 +391,7 @@ export default function Timer({ refreshKey }) {
       {showSmartToast && (
         <div style={{ position: 'fixed', top: '24px', left: '50%', transform: 'translateX(-50%)', backgroundColor: 'var(--md-sys-color-primary)', color: 'var(--md-sys-color-on-primary)', padding: '12px 24px', borderRadius: '24px', zIndex: 10, display: 'flex', alignItems: 'center', gap: '8px' }}>
           <AlertTriangle size={20} />
-          <strong>Smart Break:</strong> You historically lose focus around this time. Consider a 5 min break!
+          <strong>Smart Break:</strong> Your focus usually drops soon. Consider a preemptive 5 min break!
         </div>
       )}
 

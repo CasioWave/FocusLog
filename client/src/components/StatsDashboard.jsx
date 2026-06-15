@@ -10,7 +10,8 @@ import ManualSessionModal from './ManualSessionModal';
 import EditSessionModal from './EditSessionModal';
 import { 
   calculateTTFD, calculateMaxFlowBlock, calculateFatigueCurve, 
-  calculateRecoveryMetric, calculateTaskResilience, calculateContextSwitchPenalty 
+  calculateRecoveryMetric, calculateTaskResilience, calculateContextSwitchPenalty,
+  calculateStressEnergyCorrelation, calculateFocusTrend
 } from '../utils/AnalyticsEngine';
 import Heatmap from './Heatmap';
 
@@ -154,6 +155,36 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
       avgStreak: streakCounts > 0 ? (streakSums / streakCounts).toFixed(1) : 0 
     };
   }, [data.sessions]);
+
+  const todaysData = useMemo(() => {
+    const today = getLocalDate(new Date());
+    let totalTime = 0;
+    let tagsTime = {};
+    data.sessions.forEach(s => {
+      if (getLocalDate(new Date(s.startTime)) === today) {
+        const mins = s.durationActual / 60;
+        totalTime += mins;
+        if (!tagsTime[s.tag]) tagsTime[s.tag] = 0;
+        tagsTime[s.tag] += mins;
+      }
+    });
+    return { totalTime, tagsTime };
+  }, [data.sessions]);
+
+  const renderProgressBar = (label, currentMins, targetMins) => {
+    const pct = targetMins > 0 ? Math.min(100, (currentMins / targetMins) * 100) : 0;
+    return (
+      <div key={label} style={{ marginBottom: '16px', fontSize: '0.9rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', opacity: 0.8 }}>
+          <span>{label}</span>
+          <span>{Math.round(currentMins)} / {targetMins}m</span>
+        </div>
+        <div style={{ width: '100%', height: '4px', backgroundColor: 'var(--md-sys-color-surface-variant)', overflow: 'hidden', borderRadius: '2px' }}>
+          <div style={{ width: `${pct}%`, height: '100%', backgroundColor: 'var(--md-sys-color-primary)', transition: 'width 0.5s' }} />
+        </div>
+      </div>
+    );
+  };
 
   // Chart Data Processing
   const sessionsByTag = filteredSessions.reduce((acc, s) => {
@@ -314,11 +345,14 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
     const avgMaxFlow = flowCount > 0 ? (flowSum / flowCount) : 0;
     const avgRecovery = recCount > 0 ? (recSum / recCount) : 0;
     
-    const { curve, peakBin } = calculateFatigueCurve(filteredSessions);
+    const { curve, peakBin, enduranceLimit } = calculateFatigueCurve(filteredSessions);
     const resilience = calculateTaskResilience(filteredSessions);
     const contextPenalties = calculateContextSwitchPenalty(filteredSessions);
     
-    return { avgTTFD, avgMaxFlow, avgRecovery, curve, peakBin, resilience, contextPenalties };
+    const stressEnergyCorr = calculateStressEnergyCorrelation(filteredSessions);
+    const focusTrend = calculateFocusTrend(filteredSessions);
+    
+    return { avgTTFD, avgMaxFlow, avgRecovery, curve, peakBin, enduranceLimit, resilience, contextPenalties, stressEnergyCorr, focusTrend };
   }, [filteredSessions]);
 
   const getHeatmapColor = (val) => {
@@ -379,6 +413,16 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
               <h4>Avg Recovery Time</h4>
               <div style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--md-sys-color-primary)' }}>{Math.round(advancedMetrics.avgRecovery)} mins</div>
             </div>
+            <div className="md-card">
+              <h4>Stress-Energy Correlation</h4>
+              <div style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--md-sys-color-primary)' }}>{advancedMetrics.stressEnergyCorr.toFixed(2)}</div>
+              <p style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)' }}>Values near 1 or -1 indicate strong correlation.</p>
+            </div>
+            <div className="md-card">
+              <h4>Focus Trend</h4>
+              <div style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--md-sys-color-primary)' }}>{advancedMetrics.focusTrend.trend.toUpperCase()}</div>
+              <p style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)' }}>Slope: {advancedMetrics.focusTrend.slope.toFixed(2)}</p>
+            </div>
           </div>
           
           <div className="charts-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
@@ -434,6 +478,26 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
         </div>
       ) : (
         <>
+      {/* Goals Progress */}
+      <div className="md-card" style={{ marginBottom: '24px' }}>
+        <h3 style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Target size={20}/> Daily Goals Progress
+        </h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '24px' }}>
+          <div>
+            {renderProgressBar("Daily Total", todaysData.totalTime, config.dailyTargetMinutes)}
+          </div>
+          <div>
+            {Object.entries(config.tagTargets || {}).map(([tag, target]) => 
+              renderProgressBar(`Tag: ${tag}`, todaysData.tagsTime[tag] || 0, target)
+            )}
+            {Object.keys(config.tagTargets || {}).length === 0 && (
+              <p style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>No tag targets set.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Heatmap & Streaks */}
       {config.enabledVisualizations?.heatmap !== false && (
         <div style={{ marginBottom: '48px' }}>

@@ -134,7 +134,7 @@ io.on('connection', (socket) => {
     globalTimerState = {
       state: 'running',
       mode: data.mode || 'focus',
-      initiator: socket.id,
+      initiator: data.deviceId || socket.id,
       finishingDevice: null,
       sessionData: data,
       startTime: Date.now(),
@@ -152,10 +152,10 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('stopEarly', () => {
+  socket.on('stopEarly', (data) => {
     if (globalTimerState.state === 'running') {
       globalTimerState.state = 'finished';
-      globalTimerState.finishingDevice = socket.id;
+      globalTimerState.finishingDevice = (data && data.deviceId) ? data.deviceId : socket.id;
       io.emit('sync', globalTimerState);
     }
   });

@@ -3,6 +3,7 @@ import { Play, Square, Volume2, VolumeX, Wind, Trash2, Target, Trophy } from 'lu
 import { io } from 'socket.io-client';
 import NoiseGenerator from '../utils/NoiseGenerator';
 import Heatmap from './Heatmap';
+import { getDeviceId } from '../utils/deviceId';
 
 const socket = io('/', {
   auth: { password: localStorage.getItem('focuslog_password') || '' }
@@ -59,7 +60,7 @@ export default function MeditationTimer({ refreshKey, config }) {
         if (audioRef.current) { audioRef.current.pause(); }
         
         // Show post-session modal if we were tracking it
-        if (elapsed > 0 && !showPostModal && state.finishingDevice === socket.id) {
+        if (elapsed > 0 && !showPostModal && state.finishingDevice === getDeviceId()) {
           const expectedSecs = state.sessionData.duration * 60;
           setIsEarly(elapsed < expectedSecs - 5);
           setShowPostModal(true);
@@ -94,7 +95,7 @@ export default function MeditationTimer({ refreshKey, config }) {
 
         if (diff >= expectedSecs) {
           if (localAudioEnabled) NoiseGenerator.playSyntheticGong(220, 'sine'); // End bell
-          socket.emit('stopEarly'); // Actually just ends it
+          socket.emit('stopEarly', { deviceId: getDeviceId() }); // Actually just ends it
         }
       }, 1000);
     } else {
@@ -135,12 +136,13 @@ export default function MeditationTimer({ refreshKey, config }) {
       mode: 'meditation',
       duration: durationMins,
       noiseType,
-      gongInterval: gongIntervalMins
+      gongInterval: gongIntervalMins,
+      deviceId: getDeviceId()
     });
   };
 
   const stopMeditation = () => {
-    socket.emit('stopEarly');
+    socket.emit('stopEarly', { deviceId: getDeviceId() });
   };
 
   const saveSession = async (e) => {

@@ -1,8 +1,21 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { processDistractionCloud } from '../utils/AnalyticsEngine';
 
 export default function DistractionModal({ onLog, onCancel }) {
   const [cause, setCause] = useState('');
   const [type, setType] = useState('internal'); // 'internal' | 'external'
+  const [cloud, setCloud] = useState([]);
+
+  useEffect(() => {
+    fetch('/api/data')
+      .then(res => res.json())
+      .then(data => {
+        if (data.sessions) {
+          setCloud(processDistractionCloud(data.sessions));
+        }
+      })
+      .catch(console.error);
+  }, []);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -17,6 +30,33 @@ export default function DistractionModal({ onLog, onCancel }) {
         <h2 style={{ color: 'var(--md-sys-color-error)' }}>Log Distraction</h2>
         <p>What caused you to lose focus?</p>
         <form onSubmit={handleSubmit}>
+          {cloud.length > 0 && (
+            <div style={{ marginBottom: '16px' }}>
+              <p style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)', marginBottom: '8px' }}>Quick Select:</p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {cloud.map(w => (
+                  <button 
+                    key={w.text} 
+                    type="button" 
+                    onClick={() => {
+                      setCause(w.text);
+                      setType(w.type);
+                    }}
+                    style={{ 
+                      padding: '4px 12px', 
+                      borderRadius: '16px', 
+                      border: cause === w.text ? '2px solid var(--md-sys-color-primary)' : '1px solid var(--md-sys-color-outline)', 
+                      background: 'var(--md-sys-color-surface-variant)',
+                      cursor: 'pointer',
+                      fontSize: `${Math.min(1.2, 0.8 + w.value * 0.05)}rem`
+                    }}
+                  >
+                    {w.text}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="form-group">
             <input 
               type="text" 
