@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Download, Calendar, Trash2, Edit2, PlusCircle } from 'lucide-react';
+import { Download, Calendar, Trash2, Edit2, PlusCircle, Target } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
   LineChart, Line, ScatterChart, Scatter, ZAxis, ErrorBar,
