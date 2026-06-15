@@ -110,6 +110,10 @@ function App() {
     );
   }
 
+  if (!config) {
+    return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1e1e1e', color: '#fff' }}>Loading FocusLog...</div>;
+  }
+
   return (
     <>
       <header className="app-header">

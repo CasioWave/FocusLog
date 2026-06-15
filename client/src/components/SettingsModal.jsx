@@ -234,7 +234,7 @@ export default function SettingsModal({ onClose, onSave }) {
                             const payload = JSON.parse(text);
                             const res = await fetch('/api/import', {
                               method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
+                              headers: { 'Content-Type': 'application/json', 'x-focuslog-password': password },
                               body: JSON.stringify(payload)
                             });
                             const result = await res.json();
@@ -260,14 +260,20 @@ export default function SettingsModal({ onClose, onSave }) {
                         const confirmed = window.confirm("Are you absolutely sure you want to wipe all local data? This will delete all your sessions, tags, and topics permanently (a backup file will be created just in case).");
                         if (confirmed) {
                           try {
-                            const res = await fetch('/api/data', { method: 'DELETE' });
+                            const password = localStorage.getItem('focuslog_password') || '';
+                            const res = await fetch('/api/data', { 
+                              method: 'DELETE',
+                              headers: { 'x-focuslog-password': password }
+                            });
                             const result = await res.json();
                             if (result.success) {
                               alert(`Data wiped successfully. A backup was saved to ${result.backup}`);
                               window.location.reload();
+                            } else {
+                              alert('Failed to wipe data: ' + (result.error || 'Unknown error'));
                             }
                           } catch (err) {
-                            alert('Failed to wipe data.');
+                            alert('Failed to wipe data: ' + err.message);
                           }
                         }
                       }}

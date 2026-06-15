@@ -468,6 +468,30 @@ app.delete('/api/data', authMiddleware, (req, res) => {
     freshData.topics[t] = { topicId: t, parentDomain: "Uncategorized", lastStudied: null, historicalTau: 25, averageFrictionRate: 0, lastSessionEndState: null, lastFrictionNote: null };
   });
 
+  const freshConfig = { 
+    dataPath: currentConf.dataPath, 
+    dailyTargetMinutes: 240, 
+    weeklyTargetMinutes: 1200, 
+    smartBreakPrompts: true, 
+    tagTargets: {}, 
+    tagColors: {},
+    password: currentConf.password,
+    enableMeditation: false,
+    meditationSoundPath: "",
+    meditationDailyTargetMinutes: 15,
+    meditationWeeklyTargetMinutes: 60,
+    meditationDailyTargetSessions: 1,
+    meditationWeeklyTargetSessions: 3,
+    theme: "dark",
+    accentHue: 210,
+    timerStyle: "text",
+    showGoalsOnTimer: true,
+    enabledVisualizations: { sfi: true, timeByTag: true, timeOfDay: true, heatmap: true, stressEnergy: true, timeFocused: true, tagPie: true },
+    enableEpistemicTracking: false,
+    enableInterleaving: false
+  };
+
+  writeConfig(freshConfig);
   writeData(freshData);
   res.json({ success: true, backup: backupPath });
 });

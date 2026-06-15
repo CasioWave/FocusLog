@@ -89,6 +89,7 @@ export default function Timer({ refreshKey }) {
   const [showSmartToast, setShowSmartToast] = useState(false);
   const [allSessions, setAllSessions] = useState([]);
   const [finishingDevice, setFinishingDevice] = useState(null);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   const socketRef = useRef(null);
   const timerRef = useRef(null);
@@ -165,6 +166,7 @@ export default function Timer({ refreshKey }) {
       setBestStats({ bestSFI, longestSession, bestDaily });
       setPeakBin(peakBin);
       setEnduranceLimit(enduranceLimit);
+      setIsLoaded(true);
 
     } catch (e) {
       console.error(e);
@@ -641,6 +643,10 @@ export default function Timer({ refreshKey }) {
       </div>
     );
   };
+
+  if (!isLoaded) {
+    return <div style={{ height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', color: 'var(--md-sys-color-on-background)' }}>Loading Timer...</div>;
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: '80vh', justifyContent: 'center', position: 'relative' }}>
