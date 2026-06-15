@@ -23,6 +23,22 @@ body {
   min-height: 100vh;
 }
 
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--md-sys-color-surface-variant);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--md-sys-color-outline);
+}
+
 .app-header {
   display: flex;
   justify-content: space-between;
@@ -72,8 +88,10 @@ body {
 
 .tabs-container {
   display: flex;
+  justify-content: center;
   gap: 16px;
-  margin-bottom: 32px;
+  margin: 0 auto 32px auto;
+  flex-wrap: wrap;
 }
 
 .tab-btn {
@@ -112,8 +130,8 @@ body {
 }
 
 .modal-content {
-  width: 90%;
-  max-width: 500px;
+  width: 95%;
+  max-width: 850px;
   padding: 32px;
 }
 

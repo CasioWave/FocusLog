@@ -394,9 +394,88 @@ export default function MeditationTimer({ refreshKey, config }) {
         </button>
       </div>
 
-      <div style={{ fontSize: '4rem', fontWeight: 'bold', fontFamily: 'monospace', color: 'var(--md-sys-color-primary)', margin: '32px 0' }}>
-        {formatTime(remaining)}
-      </div>
+      {(() => {
+        const timeText = formatTime(remaining);
+        const getProgressPercentage = () => {
+          if (expectedSecs <= 0) return 0;
+          return Math.max(0, Math.min(100, (remaining / expectedSecs) * 100));
+        };
+
+        if (config?.timerStyle === 'circle') {
+          const radius = 120;
+          const circumference = 2 * Math.PI * radius;
+          const strokeDashoffset = circumference - (getProgressPercentage() / 100) * circumference;
+          return (
+            <div style={{ position: 'relative', width: '300px', height: '300px', margin: '32px auto' }}>
+              <svg width="300" height="300" style={{ transform: 'rotate(-90deg)' }}>
+                <circle cx="150" cy="150" r={radius} stroke="var(--md-sys-color-surface-variant)" strokeWidth="8" fill="transparent" />
+                <circle 
+                  cx="150" cy="150" r={radius} 
+                  stroke="var(--md-sys-color-primary)" 
+                  strokeWidth="8" 
+                  fill="transparent" 
+                  strokeDasharray={circumference} 
+                  strokeDashoffset={strokeDashoffset} 
+                  style={{ transition: 'stroke-dashoffset 1s linear' }}
+                />
+              </svg>
+              <div style={{ 
+                position: 'absolute', top: '0', left: '0', width: '100%', height: '100%', 
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '4rem', fontWeight: 'bold', fontFamily: 'monospace', color: 'var(--md-sys-color-primary)'
+              }}>
+                {timeText}
+              </div>
+            </div>
+          );
+        }
+
+        if (config?.timerStyle === 'analog') {
+          const radius = 120;
+          const sec = remaining % 60;
+          const min = Math.floor(remaining / 60);
+          const secAngle = (sec / 60) * 360;
+          const minAngle = ((min % 60) / 60) * 360 + (sec / 60) * 6;
+
+          return (
+            <div style={{ position: 'relative', width: '300px', height: '300px', margin: '32px auto' }}>
+              <svg width="300" height="300">
+                <circle cx="150" cy="150" r={radius} stroke="var(--md-sys-color-surface-variant)" strokeWidth="4" fill="rgba(var(--md-sys-color-surface-rgb), 0.5)" />
+                {[...Array(12)].map((_, i) => (
+                  <line key={i} x1="150" y1="35" x2="150" y2="45" stroke="var(--md-sys-color-on-surface-variant)" strokeWidth={i % 3 === 0 ? "4" : "2"} transform={`rotate(${i * 30} 150 150)`} />
+                ))}
+                <line x1="150" y1="150" x2="150" y2="60" stroke="var(--md-sys-color-on-surface)" strokeWidth="6" strokeLinecap="round" transform={`rotate(${minAngle} 150 150)`} style={{ transition: 'transform 0.5s' }} />
+                <line x1="150" y1="150" x2="150" y2="45" stroke="var(--md-sys-color-primary)" strokeWidth="2" strokeLinecap="round" transform={`rotate(${secAngle} 150 150)`} style={{ transition: 'transform 0.2s cubic-bezier(.4,2.08,.55,.44)' }} />
+                <circle cx="150" cy="150" r="6" fill="var(--md-sys-color-primary)" />
+              </svg>
+              <div style={{ position: 'absolute', bottom: '80px', width: '100%', textAlign: 'center', fontSize: '1.5rem', fontWeight: 600, fontFamily: 'monospace', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
+                {timeText}
+              </div>
+            </div>
+          );
+        }
+
+        if (config?.timerStyle === 'linear') {
+          const pct = getProgressPercentage();
+          return (
+            <div style={{ width: '100%', maxWidth: '600px', margin: '32px auto', textAlign: 'center' }}>
+              <div style={{ fontSize: '4rem', fontWeight: 'bold', fontFamily: 'monospace', color: 'var(--md-sys-color-primary)', marginBottom: '24px' }}>
+                {timeText}
+              </div>
+              <div style={{ width: '100%', height: '4px', backgroundColor: 'var(--md-sys-color-surface-variant)', position: 'relative', borderRadius: '2px', overflow: 'hidden' }}>
+                <div style={{ position: 'absolute', left: 0, top: 0, width: `${pct}%`, height: '100%', backgroundColor: 'var(--md-sys-color-primary)', transition: 'width 1s linear' }} />
+              </div>
+            </div>
+          );
+        }
+
+        // Default 'text'
+        return (
+          <div style={{ fontSize: '4rem', fontWeight: 'bold', fontFamily: 'monospace', color: 'var(--md-sys-color-primary)', margin: '32px 0' }}>
+            {timeText}
+          </div>
+        );
+      })()}
 
       <button className="md-button md-button-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '0 auto' }} onClick={stopMeditation}>
         <Square size={20} /> End Early

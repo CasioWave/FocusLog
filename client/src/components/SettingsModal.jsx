@@ -10,7 +10,10 @@ export default function SettingsModal({ onClose, onSave }) {
     meditationDailyTargetSessions: 1, meditationWeeklyTargetSessions: 3,
     theme: 'dark', accentHue: 210,
     timerStyle: 'text', showGoalsOnTimer: true,
-    enabledVisualizations: { sfi: true, timeByTag: true, timeOfDay: true, heatmap: true, stressEnergy: true, timeFocused: true, tagPie: true }
+    enabledVisualizations: { sfi: true, timeByTag: true, timeOfDay: true, heatmap: true, stressEnergy: true, timeFocused: true, tagPie: true },
+    enableEpistemicTracking: false,
+    enableInterleaving: false,
+    cognitiveExpenditureLimit: 100
   });
   const [tags, setTags] = useState([]);
   const [newMasterTag, setNewMasterTag] = useState('');
@@ -56,7 +59,13 @@ export default function SettingsModal({ onClose, onSave }) {
           accentHue: config.accentHue,
           timerStyle: config.timerStyle,
           showGoalsOnTimer: config.showGoalsOnTimer,
-          enabledVisualizations: config.enabledVisualizations
+          enabledVisualizations: config.enabledVisualizations,
+          enableEpistemicTracking: config.enableEpistemicTracking,
+          enableInterleaving: config.enableInterleaving,
+          cognitiveExpenditureLimit: config.cognitiveExpenditureLimit,
+          showDailySectorChartOnTimer: config.showDailySectorChartOnTimer,
+          backgroundImage: config.backgroundImage,
+          customBackgroundImage: config.customBackgroundImage
         })
       });
       document.documentElement.setAttribute('data-theme', config.theme);
@@ -117,6 +126,7 @@ export default function SettingsModal({ onClose, onSave }) {
           <div style={{ width: '200px', borderRight: '1px solid var(--md-sys-color-outline)', padding: '16px 0' }}>
             {[
               { id: 'general', label: 'General', icon: <Database size={18} /> },
+              { id: 'advanced', label: 'Advanced Features', icon: <Monitor size={18} /> },
               { id: 'visuals', label: 'Themes & UI', icon: <Palette size={18} /> },
               { id: 'tags', label: 'Tags & Targets', icon: <Target size={18} /> },
               { id: 'audio', label: 'Audio & Meditation', icon: <Wind size={18} /> },
@@ -241,8 +251,74 @@ export default function SettingsModal({ onClose, onSave }) {
                         }}
                       />
                     </label>
+                    
+                    <button 
+                      type="button" 
+                      className="md-button" 
+                      style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'var(--md-sys-color-error)', color: 'var(--md-sys-color-on-error)' }}
+                      onClick={async () => {
+                        const confirmed = window.confirm("Are you absolutely sure you want to wipe all local data? This will delete all your sessions, tags, and topics permanently (a backup file will be created just in case).");
+                        if (confirmed) {
+                          try {
+                            const res = await fetch('/api/data', { method: 'DELETE' });
+                            const result = await res.json();
+                            if (result.success) {
+                              alert(`Data wiped successfully. A backup was saved to ${result.backup}`);
+                              window.location.reload();
+                            }
+                          } catch (err) {
+                            alert('Failed to wipe data.');
+                          }
+                        }
+                      }}
+                    >
+                      <Trash2 size={18} /> Wipe All Data
+                    </button>
                   </div>
 
+                </div>
+              )}
+
+              {activeTab === 'advanced' && (
+                <div className="timer-active-card">
+                  <h3 style={{ marginBottom: '16px' }}>Advanced Cognitive Workflows</h3>
+                  
+                  <div className="form-group" style={{ marginTop: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={config.enableEpistemicTracking || false} 
+                      onChange={e => setConfig({...config, enableEpistemicTracking: e.target.checked})}
+                    />
+                    <label style={{ margin: 0, fontWeight: 'bold' }}>Enable Epistemic & Cognitive Friction Tracking</label>
+                  </div>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--md-sys-color-on-surface-variant)', marginLeft: '24px', marginBottom: '16px' }}>
+                    Enables tracking of high-friction epistemic stances (Ingestion, Symbolic, Sense-Making, Translation) and visualizes Focus Decay limits (τ).
+                  </p>
+                  
+                  {config.enableEpistemicTracking && (
+                    <div className="form-group" style={{ marginTop: '16px', marginLeft: '24px' }}>
+                      <label>Cognitive Expenditure Limit (Decay Warning)</label>
+                      <input 
+                        type="number" 
+                        value={config.cognitiveExpenditureLimit || 100} 
+                        onChange={e => setConfig({...config, cognitiveExpenditureLimit: parseInt(e.target.value) || 100})}
+                        className="md-input"
+                        min="10" max="1000"
+                      />
+                    </div>
+                  )}
+
+                  <div className="form-group" style={{ marginTop: '24px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={config.enableInterleaving || false} 
+                      onChange={e => setConfig({...config, enableInterleaving: e.target.checked})}
+                    />
+                    <label style={{ margin: 0, fontWeight: 'bold' }}>Enable Algorithmic Interleaving & Spaced Retrieval</label>
+                  </div>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--md-sys-color-on-surface-variant)', marginLeft: '24px' }}>
+                    Automatically models a Priority Queue and interrupts your timer when focus capacity drops. Injects 'Entry Tickets' when returning to topics to build retrieval strength.
+                  </p>
                 </div>
               )}
 
@@ -269,8 +345,70 @@ export default function SettingsModal({ onClose, onSave }) {
                       max="360" 
                       value={config.accentHue || 210} 
                       onChange={e => setConfig({...config, accentHue: parseInt(e.target.value)})}
-                      style={{ width: '100%', marginTop: '8px', background: `linear-gradient(to right, hsl(0, 70%, 50%), hsl(60, 70%, 50%), hsl(120, 70%, 50%), hsl(180, 70%, 50%), hsl(240, 70%, 50%), hsl(300, 70%, 50%), hsl(360, 70%, 50%))` }}
+                      style={{ 
+                        width: '100%', 
+                        marginTop: '8px', 
+                        height: '12px',
+                        borderRadius: '6px',
+                        appearance: 'none',
+                        outline: 'none',
+                        background: `linear-gradient(to right, hsl(0, 70%, 50%), hsl(60, 70%, 50%), hsl(120, 70%, 50%), hsl(180, 70%, 50%), hsl(240, 70%, 50%), hsl(300, 70%, 50%), hsl(360, 70%, 50%))` 
+                      }}
                     />
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+                      {[
+                        { label: 'Cyberpunk Pink', hue: 320 },
+                        { label: 'Toxic Green', hue: 120 },
+                        { label: 'Deep Ocean', hue: 210 },
+                        { label: 'Sunset Orange', hue: 25 },
+                        { label: 'Royal Purple', hue: 275 },
+                        { label: 'Crimson Red', hue: 350 },
+                      ].map(swatch => (
+                        <button
+                          key={swatch.hue}
+                          type="button"
+                          onClick={() => setConfig({...config, accentHue: swatch.hue})}
+                          style={{
+                            width: '32px', height: '32px', borderRadius: '50%', border: config.accentHue === swatch.hue ? '2px solid white' : 'none',
+                            backgroundColor: `hsl(${swatch.hue}, 70%, 50%)`, cursor: 'pointer',
+                            boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
+                          }}
+                          title={swatch.label}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '16px' }}>
+                    <label>App Background</label>
+                    <select 
+                      className="md-input" 
+                      value={config.backgroundImage || 'none'} 
+                      onChange={e => setConfig({...config, backgroundImage: e.target.value})}
+                      style={{ marginBottom: '8px' }}
+                    >
+                      <option value="none">Default Grid</option>
+                      <option value="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop">Abstract Liquid Mesh</option>
+                      <option value="https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=2672&auto=format&fit=crop">Deep Space Edge</option>
+                      <option value="https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=2670&auto=format&fit=crop">Subdued Cybernetic</option>
+                      <option value="custom">Custom URL...</option>
+                    </select>
+                    {config.backgroundImage === 'custom' && (
+                      <input 
+                        type="text" 
+                        className="md-input" 
+                        placeholder="https://example.com/image.jpg"
+                        value={config.customBackgroundImage || ''}
+                        onChange={e => {
+                          setConfig({...config, customBackgroundImage: e.target.value});
+                          // Immediately apply custom bg if validish
+                          if (e.target.value.startsWith('http')) {
+                            document.body.style.backgroundImage = `url('${e.target.value}')`;
+                            document.body.style.backgroundSize = 'cover';
+                          }
+                        }}
+                      />
+                    )}
                   </div>
 
                   <hr style={{ borderTop: '1px solid var(--md-sys-color-outline)', margin: '24px 0', opacity: 0.2 }} />
@@ -282,16 +420,27 @@ export default function SettingsModal({ onClose, onSave }) {
                     <select className="md-input" value={config.timerStyle || 'text'} onChange={e => setConfig({...config, timerStyle: e.target.value})}>
                       <option value="text">Massive Text</option>
                       <option value="circle">Circular Progress Ring</option>
+                      <option value="analog">Analog Minimalist</option>
+                      <option value="linear">Linear Drain</option>
                     </select>
                   </div>
 
-                  <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '32px' }}>
+                  <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
                     <input 
                       type="checkbox" 
                       checked={config.showGoalsOnTimer !== false} 
                       onChange={e => setConfig({...config, showGoalsOnTimer: e.target.checked})}
                     />
                     <label style={{ margin: 0 }}>Show Goals & Challenge Dashboard on Timer Screen</label>
+                  </div>
+
+                  <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '32px' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={config.showDailySectorChartOnTimer || false} 
+                      onChange={e => setConfig({...config, showDailySectorChartOnTimer: e.target.checked})}
+                    />
+                    <label style={{ margin: 0 }}>Show Daily Cognitive Sector Chart on Timer Screen</label>
                   </div>
 
                   <hr style={{ borderTop: '1px solid var(--md-sys-color-outline)', margin: '24px 0', opacity: 0.2 }} />

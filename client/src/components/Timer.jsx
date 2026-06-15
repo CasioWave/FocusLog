@@ -3,10 +3,14 @@ import { Play, Square, AlertTriangle, Trophy, Target, Settings as SettingsIcon }
 import PreSessionModal from './PreSessionModal';
 import DistractionModal from './DistractionModal';
 import PostSessionModal from './PostSessionModal';
+import FrictionModal from './FrictionModal';
+import ContextSwitchModal from './ContextSwitchModal';
+import EntryTicketModal from './EntryTicketModal';
 import { audioController } from '../utils/AudioController';
-import { calculateFatigueCurve } from '../utils/AnalyticsEngine';
+import { calculateFatigueCurve, calculateEnduranceConstants, calculateInterleavingQueue } from '../utils/AnalyticsEngine';
 import { io } from 'socket.io-client';
 import Heatmap from './Heatmap';
+import DailySectorChart from './DailySectorChart';
 import { getDeviceId } from '../utils/deviceId';
 
 const computeSFI = (startTime, endTime, distractions) => {
@@ -43,6 +47,30 @@ export default function Timer({ refreshKey }) {
   const [showPreModal, setShowPreModal] = useState(false);
   const [showDistractionModal, setShowDistractionModal] = useState(false);
   const [showPostModal, setShowPostModal] = useState(false);
+  const [showFrictionModal, setShowFrictionModal] = useState(false);
+  
+  const [localEvents, setLocalEvents] = useState([]);
+  const [currentStance, setCurrentStance] = useState('INGESTION');
+  const [cognitiveExpenditure, setCognitiveExpenditure] = useState(0);
+  const [decayWarningTriggered, setDecayWarningTriggered] = useState(false);
+  const [smartToastMsg, setSmartToastMsg] = useState('');
+  const currentStanceRef = useRef('INGESTION');
+  
+  const [currentTau, setCurrentTau] = useState(25);
+  const [focusCapacity, setFocusCapacity] = useState(1.0);
+  const [zeigarnikTriggered, setZeigarnikTriggered] = useState(false);
+  const [localHazardRate, setLocalHazardRate] = useState(0);
+  const [lastFrictionTime, setLastFrictionTime] = useState(Date.now());
+  
+  const [showContextSwitchModal, setShowContextSwitchModal] = useState(false);
+  const [showEntryTicketModal, setShowEntryTicketModal] = useState(false);
+  const [interleavingQueue, setInterleavingQueue] = useState([]);
+  const [topicsMetadata, setTopicsMetadata] = useState({});
+  const [entryTicketLatency, setEntryTicketLatency] = useState(null);
+  const [proposedSwitchTopic, setProposedSwitchTopic] = useState(null);
+  const [proposedSwitchState, setProposedSwitchState] = useState(null);
+  const [startConfigCache, setStartConfigCache] = useState(null);
+  
   const [pendingSessionData, setPendingSessionData] = useState(null);
   const [distractions, setDistractions] = useState([]);
   
@@ -51,7 +79,7 @@ export default function Timer({ refreshKey }) {
   const [randomMin, setRandomMin] = useState(5);
   const [randomMax, setRandomMax] = useState(15);
   
-  const [config, setConfig] = useState({ dailyTargetMinutes: 0, weeklyTargetMinutes: 1200, smartBreakPrompts: true, tagTargets: {}, showGoalsOnTimer: true, timerStyle: 'text' });
+  const [config, setConfig] = useState({ dailyTargetMinutes: 0, weeklyTargetMinutes: 1200, smartBreakPrompts: true, tagTargets: {}, showGoalsOnTimer: true, timerStyle: 'text', enableEpistemicTracking: true });
   const [todaysData, setTodaysData] = useState({ totalTime: 0, tagsTime: {} });
   const [weeklyData, setWeeklyData] = useState({ totalTime: 0, consistency: 0 });
   const [bestStats, setBestStats] = useState({ bestSFI: 0, longestSession: 0, bestDaily: 0 });
@@ -75,6 +103,7 @@ export default function Timer({ refreshKey }) {
       const allData = await dataRes.json();
       setConfig(conf);
       setAllSessions(allData.sessions || []);
+      setTopicsMetadata(allData.topics || {});
       
       const today = getLocalDate(new Date().toISOString());
       let todayTotal = 0;
@@ -151,7 +180,6 @@ export default function Timer({ refreshKey }) {
     socketRef.current = socket;
 
     socket.on('sync', (serverState) => {
-      // Don't process if this is a meditation session and we're currently idle, we want this component to only handle focus mode
       if (serverState.state !== 'idle' && serverState.mode !== 'focus') return;
       
       setSessionState(serverState.state);
@@ -205,8 +233,20 @@ export default function Timer({ refreshKey }) {
             return prev - 1;
           });
           setTimeElapsed(prev => prev + 1);
+          if (config.enableEpistemicTracking) {
+             const w = { INGESTION: 0.8, SYMBOL_MANIPULATION: 1.5, SENSE_MAKING: 1.2, TRANSLATION: 1.0 };
+             const weight = w[currentStanceRef.current] || 0;
+             setCognitiveExpenditure(prev => prev + weight / 60);
+             setFocusCapacity(prev => Math.max(0, prev * Math.exp(-(weight / 60) / (currentTau || 25))));
+          }
         } else {
           setTimeElapsed((prev) => prev + 1);
+          if (config.enableEpistemicTracking) {
+             const w = { INGESTION: 0.8, SYMBOL_MANIPULATION: 1.5, SENSE_MAKING: 1.2, TRANSLATION: 1.0 };
+             const weight = w[currentStanceRef.current] || 0;
+             setCognitiveExpenditure(prev => prev + weight / 60);
+             setFocusCapacity(prev => Math.max(0, prev * Math.exp(-(weight / 60) / (currentTau || 25))));
+          }
         }
       }, 1000);
     } else {
@@ -250,6 +290,7 @@ export default function Timer({ refreshKey }) {
       
       if (Math.floor(timeElapsed / 60) === promptMinute) {
         setSmartBreakPrompted(true);
+        setSmartToastMsg("Your focus usually drops soon. Preemptive 5 min break?");
         setShowSmartToast(true);
         if ("Notification" in window && Notification.permission === "granted") {
            new Notification("Smart Break", { body: `Your focus usually drops soon. Preemptive 5 min break?` });
@@ -259,11 +300,118 @@ export default function Timer({ refreshKey }) {
     }
   }, [timeElapsed, sessionState, config.smartBreakPrompts, enduranceLimit, smartBreakPrompted]);
 
+  useEffect(() => {
+    if (sessionState === 'running' && config.enableEpistemicTracking && currentTau) {
+       const zTime = currentTau * 0.85;
+       if (timeElapsed / 60 >= zTime && !zeigarnikTriggered) {
+          setZeigarnikTriggered(true);
+          if (config.enableInterleaving && interleavingQueue.length > 0) {
+            const nextTopic = interleavingQueue[0];
+            setProposedSwitchTopic(nextTopic.topicId);
+            setProposedSwitchState('INGESTION'); 
+            setShowContextSwitchModal(true);
+          } else {
+            setSmartToastMsg(`Zeigarnik Trigger: You are approaching your focus limit (${currentTau}m). Take a break to preserve context!`);
+            setShowSmartToast(true);
+            if ("Notification" in window && Notification.permission === "granted") {
+               new Notification("Zeigarnik Trigger", { body: `Focus capacity depleting. Take a break to preserve context!` });
+            }
+            setTimeout(() => setShowSmartToast(false), 10000);
+          }
+       }
+    }
+  }, [timeElapsed, sessionState, config.enableEpistemicTracking, currentTau, zeigarnikTriggered, interleavingQueue]);
+
+  useEffect(() => {
+    if (sessionState === 'running' && config.enableEpistemicTracking) {
+       const limit = config.cognitiveExpenditureLimit || 100;
+       if (cognitiveExpenditure >= limit && !decayWarningTriggered) {
+          setDecayWarningTriggered(true);
+          setSmartToastMsg("Decay Warning: High cognitive expenditure reached. Consider a break.");
+          setShowSmartToast(true);
+          if ("Notification" in window && Notification.permission === "granted") {
+             new Notification("Decay Warning", { body: `High cognitive expenditure reached.` });
+          }
+          setTimeout(() => setShowSmartToast(false), 10000);
+       }
+    }
+  }, [cognitiveExpenditure, sessionState, config.enableEpistemicTracking, config.cognitiveExpenditureLimit, decayWarningTriggered]);
+
+  const handleStanceChange = (e) => {
+    const newStance = e.target.value;
+    setCurrentStance(newStance);
+    currentStanceRef.current = newStance;
+    setLocalEvents(prev => [...prev, { timestamp: new Date().toISOString(), type: 'STATE_CHANGE', state: newStance }]);
+  };
+
+  useEffect(() => {
+     if (sessionState !== 'running' || !config.enableEpistemicTracking) return;
+     const handleKeyDown = (e) => {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || showDistractionModal || showFrictionModal) return;
+        switch (e.key) {
+           case '1': handleStanceChange({ target: { value: 'INGESTION' } }); break;
+           case '2': handleStanceChange({ target: { value: 'SYMBOL_MANIPULATION' } }); break;
+           case '3': handleStanceChange({ target: { value: 'SENSE_MAKING' } }); break;
+           case '4': handleStanceChange({ target: { value: 'TRANSLATION' } }); break;
+           case 'f':
+           case 'F':
+             e.preventDefault();
+             setShowFrictionModal(true);
+             break;
+        }
+     };
+     window.addEventListener('keydown', handleKeyDown);
+     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [sessionState, config.enableEpistemicTracking, showDistractionModal, showFrictionModal]);
+
   const handleStartRequest = () => setShowPreModal(true);
 
   const handleStart = (startConfig) => {
     setShowPreModal(false);
+    
+    if (config.enableEpistemicTracking && topicsMetadata[startConfig.tag]) {
+      const topicInfo = topicsMetadata[startConfig.tag];
+      if (topicInfo.lastSessionEndState || topicInfo.lastFrictionNote) {
+        setStartConfigCache(startConfig);
+        setShowEntryTicketModal(true);
+        return;
+      }
+    }
+    
+    executeStart(startConfig, null);
+  };
+
+  const handleEntryTicketSubmit = (ticket, latency) => {
+    setShowEntryTicketModal(false);
+    executeStart(startConfigCache, latency);
+  };
+
+  const executeStart = (startConfig, latency) => {
     setSmartBreakPrompted(false);
+    setDecayWarningTriggered(false);
+    setCognitiveExpenditure(0);
+    setEntryTicketLatency(latency);
+    
+    if (startConfig.stance) {
+      setCurrentStance(startConfig.stance);
+      currentStanceRef.current = startConfig.stance;
+      setLocalEvents([{ timestamp: new Date().toISOString(), type: 'STATE_CHANGE', state: startConfig.stance }]);
+    } else {
+      setLocalEvents([]);
+    }
+    
+    if (config.enableEpistemicTracking) {
+      const taus = calculateEnduranceConstants(allSessions);
+      const tau = taus[startConfig.tag] || 25;
+      setCurrentTau(tau);
+      setFocusCapacity(1.0);
+      setZeigarnikTriggered(false);
+      setLocalHazardRate(0);
+      setLastFrictionTime(Date.now());
+      
+      const queue = calculateInterleavingQueue(topicsMetadata, startConfig.tag, startConfig.stance || 'INGESTION');
+      setInterleavingQueue(queue);
+    }
     
     if (audioMode === 'interval') audioController.startIntervalBell(intervalMins);
     if (audioMode === 'random') audioController.startRandomBell(randomMin, randomMax);
@@ -282,30 +430,88 @@ export default function Timer({ refreshKey }) {
       endTime,
       durationActual: actualElapsedSeconds,
       distractions,
+      events: [...localEvents, { timestamp: endTime || new Date().toISOString(), type: 'SESSION_END' }],
       sfi,
       notes
     };
+    if (entryTicketLatency) finalData.entryTicketLatency = entryTicketLatency;
     
     try {
       await fetch('/api/sessions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-focuslog-password': config.password || '' },
         body: JSON.stringify(finalData)
       });
+      
+      if (config.enableEpistemicTracking && finalData.tag) {
+        const hFriction = localEvents.filter(e => e.type === 'FRICTION_LOG').length;
+        const durHrs = finalData.durationActual / 3600;
+        const rate = durHrs > 0 ? hFriction / durHrs : 0;
+        const lastFriction = [...localEvents].reverse().find(e => e.type === 'FRICTION_LOG');
+        
+        await fetch('/api/topics/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-focuslog-password': config.password || '' },
+          body: JSON.stringify({
+            topicId: finalData.tag,
+            metadata: {
+              lastStudied: new Date().toISOString(),
+              averageFrictionRate: rate,
+              lastSessionEndState: currentStance,
+              lastFrictionNote: lastFriction ? lastFriction.note : null
+            }
+          })
+        });
+      }
+      
       fetchStats(); 
-    } catch (e) {}
+    } catch (e) {
+      console.error(e);
+    }
     
     setPendingSessionData(null);
     socketRef.current.emit('finalizeSession', breakDuration);
+  };
+
+  const handleAcceptSwitch = () => {
+    setShowContextSwitchModal(false);
+    socketRef.current.emit('stopEarly', { deviceId: getDeviceId() });
+    
+    setStartConfigCache({
+      goal: `Interleaved: ${proposedSwitchTopic}`,
+      type: sessionData.type,
+      duration: sessionData.type === 'countdown' ? 25 * 60 : 0,
+      tag: proposedSwitchTopic,
+      energy: 3,
+      stress: 3,
+      stance: proposedSwitchState
+    });
+    setShowEntryTicketModal(true);
   };
 
   const stopEarly = () => {
       socketRef.current.emit('stopEarly', { deviceId: getDeviceId() });
   };
 
+  const updateHazardRate = () => {
+    const now = Date.now();
+    const dt = (now - lastFrictionTime) / 60000;
+    if (dt > 0) {
+      setLocalHazardRate(1 / dt);
+    }
+    setLastFrictionTime(now);
+  };
+
   const handleDistractionLog = (data) => {
     setShowDistractionModal(false);
     socketRef.current.emit('logDistraction', { time: new Date().toISOString(), cause: data.cause, type: data.type });
+    updateHazardRate();
+  };
+
+  const handleFrictionLog = (category, note) => {
+    setLocalEvents(prev => [...prev, { timestamp: new Date().toISOString(), type: 'FRICTION_LOG', frictionType: category, note }]);
+    setShowFrictionModal(false);
+    updateHazardRate();
   };
 
   const formatTime = (seconds) => {
@@ -323,7 +529,7 @@ export default function Timer({ refreshKey }) {
   };
 
   const getProgressPercentage = () => {
-    if (sessionState === 'break') return 0; // Or calculate break progress
+    if (sessionState === 'break') return 0;
     if (!sessionData || sessionData.type !== 'countdown') return 100;
     const total = sessionData.duration;
     if (total <= 0) return 0;
@@ -378,6 +584,57 @@ export default function Timer({ refreshKey }) {
       );
     }
 
+    if (config.timerStyle === 'analog') {
+      const radius = 120;
+      let minAngle = 0;
+      let secAngle = 0;
+      if (sessionData && sessionData.type === 'countdown') {
+        const sec = timeRemaining % 60;
+        const min = Math.floor(timeRemaining / 60);
+        secAngle = (sec / 60) * 360;
+        minAngle = ((min % 60) / 60) * 360 + (sec / 60) * 6;
+      } else {
+        const sec = timeElapsed % 60;
+        const min = Math.floor(timeElapsed / 60);
+        secAngle = (sec / 60) * 360;
+        minAngle = ((min % 60) / 60) * 360 + (sec / 60) * 6;
+      }
+
+      return (
+        <div style={{ position: 'relative', width: '300px', height: '300px', margin: '0 auto' }}>
+          <svg width="300" height="300">
+            <circle cx="150" cy="150" r={radius} stroke="var(--md-sys-color-surface-variant)" strokeWidth="4" fill="rgba(var(--md-sys-color-surface-rgb), 0.5)" />
+            {/* Ticks */}
+            {[...Array(12)].map((_, i) => (
+               <line key={i} x1="150" y1="35" x2="150" y2="45" stroke="var(--md-sys-color-on-surface-variant)" strokeWidth={i % 3 === 0 ? "4" : "2"} transform={`rotate(${i * 30} 150 150)`} />
+            ))}
+            {/* Minute Hand */}
+            <line x1="150" y1="150" x2="150" y2="60" stroke="var(--md-sys-color-on-surface)" strokeWidth="6" strokeLinecap="round" transform={`rotate(${minAngle} 150 150)`} style={{ transition: 'transform 0.5s' }} />
+            {/* Second Hand */}
+            <line x1="150" y1="150" x2="150" y2="45" stroke="var(--md-sys-color-primary)" strokeWidth="2" strokeLinecap="round" transform={`rotate(${secAngle} 150 150)`} style={{ transition: 'transform 0.2s cubic-bezier(.4,2.08,.55,.44)' }} />
+            <circle cx="150" cy="150" r="6" fill="var(--md-sys-color-primary)" />
+          </svg>
+          <div className="mono" style={{ position: 'absolute', bottom: '80px', width: '100%', textAlign: 'center', fontSize: '1.5rem', fontWeight: 600, textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
+            {timeText}
+          </div>
+        </div>
+      );
+    }
+
+    if (config.timerStyle === 'linear') {
+      const pct = getProgressPercentage();
+      return (
+        <div style={{ width: '100%', maxWidth: '600px', margin: '48px auto', textAlign: 'center' }}>
+          <div className="mono" style={{ fontSize: '4rem', fontWeight: '500', marginBottom: '24px', letterSpacing: '-2px' }}>
+            {timeText}
+          </div>
+          <div style={{ width: '100%', height: '4px', backgroundColor: 'var(--md-sys-color-surface-variant)', position: 'relative', borderRadius: '2px', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', left: 0, top: 0, width: `${pct}%`, height: '100%', backgroundColor: 'var(--md-sys-color-primary)', transition: 'width 1s linear' }} />
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="mono" style={{ fontSize: '8rem', fontWeight: '700', letterSpacing: '-4px', lineHeight: 1, margin: '24px 0', textShadow: '0 4px 24px rgba(0,0,0,0.5)' }}>
         {timeText}
@@ -391,11 +648,10 @@ export default function Timer({ refreshKey }) {
       {showSmartToast && (
         <div style={{ position: 'fixed', top: '24px', left: '50%', transform: 'translateX(-50%)', backgroundColor: 'var(--md-sys-color-primary)', color: 'var(--md-sys-color-on-primary)', padding: '12px 24px', borderRadius: '24px', zIndex: 10, display: 'flex', alignItems: 'center', gap: '8px' }}>
           <AlertTriangle size={20} />
-          <strong>Smart Break:</strong> Your focus usually drops soon. Consider a preemptive 5 min break!
+          <strong>Alert:</strong> {smartToastMsg}
         </div>
       )}
 
-      {/* Main Central Timer Area */}
       <div style={{ textAlign: 'center', zIndex: 2, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         
         {(sessionState === 'running' || sessionState === 'break' || sessionState === 'finished') && (sessionData || sessionState === 'break') && (
@@ -453,6 +709,31 @@ export default function Timer({ refreshKey }) {
           )}
         </div>
         
+        {sessionState === 'running' && config?.enableEpistemicTracking && (
+          <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '0.9rem', color: 'var(--md-sys-color-on-surface-variant)' }}>Current Stance:</span>
+              <select 
+                value={currentStance} 
+                onChange={handleStanceChange}
+                className="md-input"
+                style={{ width: 'auto', padding: '8px 16px', borderRadius: '16px', backgroundColor: 'var(--md-sys-color-surface-variant)', border: 'none' }}
+              >
+                <option value="INGESTION">Ingestion (1)</option>
+                <option value="SYMBOL_MANIPULATION">Symbol Manipulation (2)</option>
+                <option value="SENSE_MAKING">Sense-Making (3)</option>
+                <option value="TRANSLATION">Translation (4)</option>
+              </select>
+            </div>
+            <div style={{ fontSize: '0.8rem', opacity: 0.7, color: 'var(--md-sys-color-primary)', display: 'flex', gap: '16px' }}>
+               <span>E: <strong>{cognitiveExpenditure.toFixed(1)}</strong> / {config.cognitiveExpenditureLimit || 100}</span>
+               <span>C(t): <strong>{(focusCapacity * 100).toFixed(1)}%</strong></span>
+               <span>λ: <strong>{localHazardRate.toFixed(2)}</strong> /m</span>
+               <span>τ: <strong>{currentTau}</strong>m</span>
+            </div>
+          </div>
+        )}
+        
         {sessionState === 'finished' && (
           <div style={{ marginTop: '24px', color: timeElapsed < 300 ? 'var(--md-sys-color-on-surface-variant)' : 'var(--md-sys-color-primary)' }}>
             <p>{timeElapsed < 300 ? 'Session < 5 mins (Not Saved)' : 'Session Saved!'}</p>
@@ -460,7 +741,6 @@ export default function Timer({ refreshKey }) {
         )}
       </div>
 
-      {/* Heatmap integrated seamlessly below timer */}
       {sessionState === 'idle' && (
         <div style={{ width: '100%', maxWidth: '800px', marginTop: '64px' }}>
           <Heatmap sessions={allSessions} />
@@ -470,7 +750,6 @@ export default function Timer({ refreshKey }) {
         </div>
       )}
 
-      {/* Optional Goals Display */}
       {sessionState === 'idle' && config.showGoalsOnTimer && (
         <div style={{ display: 'flex', gap: '32px', marginTop: '64px', width: '100%', maxWidth: '800px', opacity: 0.8 }}>
           <div style={{ flex: 1 }}>
@@ -493,26 +772,20 @@ export default function Timer({ refreshKey }) {
         </div>
       )}
 
+      {sessionState === 'idle' && config.showDailySectorChartOnTimer && (
+        <div style={{ width: '100%', maxWidth: '800px', marginTop: '64px', marginBottom: '64px' }}>
+          <h4 style={{ textAlign: 'center', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '1px', fontSize: '0.85rem' }}>Today's Cognitive Sectors</h4>
+          <DailySectorChart sessions={allSessions} config={config} />
+        </div>
+      )}
+
       {/* Modals */}
-      {showPreModal && (
-        <PreSessionModal 
-          onStart={handleStart} 
-          onCancel={() => setShowPreModal(false)} 
-        />
-      )}
-
-      {showDistractionModal && (
-        <DistractionModal 
-          onLog={handleDistractionLog} 
-          onCancel={() => setShowDistractionModal(false)} 
-        />
-      )}
-
-      {showPostModal && (
-        <PostSessionModal 
-          onSave={finalizeSession} 
-        />
-      )}
+      {showPreModal && <PreSessionModal onStart={handleStart} onCancel={() => setShowPreModal(false)} config={config} />}
+      {showDistractionModal && <DistractionModal onLog={handleDistractionLog} onCancel={() => setShowDistractionModal(false)} />}
+      {showPostModal && <PostSessionModal sessionData={pendingSessionData} onFinalize={finalizeSession} />}
+      {showFrictionModal && <FrictionModal onLog={handleFrictionLog} onCancel={() => setShowFrictionModal(false)} />}
+      {showContextSwitchModal && <ContextSwitchModal proposedTopic={proposedSwitchTopic} suggestedState={proposedSwitchState} onAccept={handleAcceptSwitch} onSnooze={() => setShowContextSwitchModal(false)} />}
+      {showEntryTicketModal && <EntryTicketModal topic={startConfigCache?.tag} lastFrictionNote={topicsMetadata[startConfigCache?.tag]?.lastFrictionNote} lastSessionEndState={topicsMetadata[startConfigCache?.tag]?.lastSessionEndState} onSubmit={handleEntryTicketSubmit} />}
     </div>
   );
 }

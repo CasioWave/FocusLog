@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 
-export default function PreSessionModal({ onStart, onCancel }) {
+export default function PreSessionModal({ onStart, onCancel, config }) {
   const [goal, setGoal] = useState('');
+  const [stance, setStance] = useState('INGESTION');
   const [type, setType] = useState('countdown'); // 'countdown' | 'infinite'
   const [duration, setDuration] = useState(25); // in minutes
   const [tags, setTags] = useState([]);
@@ -13,9 +14,13 @@ export default function PreSessionModal({ onStart, onCancel }) {
     fetch('/api/data')
       .then(res => res.json())
       .then(data => {
-        setTags(data.tags || []);
-        if (data.tags && data.tags.length > 0) {
-          setSelectedTag(data.tags[0]);
+        if (data.topics && Object.keys(data.topics).length > 0) {
+          const keys = Object.keys(data.topics);
+          setTags(keys);
+          setSelectedTag(keys[0]);
+        } else if (data.tags) {
+          setTags(data.tags);
+          if (data.tags.length > 0) setSelectedTag(data.tags[0]);
         }
       })
       .catch(console.error);
@@ -33,7 +38,8 @@ export default function PreSessionModal({ onStart, onCancel }) {
       duration: type === 'countdown' ? duration * 60 : 0,
       tag: selectedTag,
       energy,
-      stress
+      stress,
+      stance: config?.enableEpistemicTracking ? stance : null
     });
   };
 
@@ -138,6 +144,22 @@ export default function PreSessionModal({ onStart, onCancel }) {
               </div>
             </div>
           </div>
+
+          {config?.enableEpistemicTracking && (
+            <div className="form-group" style={{ marginTop: '16px' }}>
+              <label>Initial Epistemic Stance</label>
+              <select 
+                value={stance} 
+                onChange={e => setStance(e.target.value)}
+                className="md-input"
+              >
+                <option value="INGESTION">Ingestion (Reading, lit review)</option>
+                <option value="SYMBOL_MANIPULATION">Symbol Manipulation / Derivation</option>
+                <option value="SENSE_MAKING">Sense-Making / Sanity Checking</option>
+                <option value="TRANSLATION">Translation / Implementation</option>
+              </select>
+            </div>
+          )}
 
           <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '16px', marginTop: '24px' }}>
             <button type="button" onClick={onCancel} className="md-button md-button-secondary">Cancel</button>

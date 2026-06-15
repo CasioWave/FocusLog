@@ -33,7 +33,9 @@ const readConfig = () => {
       accentHue: 210,
       timerStyle: "text",
       showGoalsOnTimer: true,
-      enabledVisualizations: { sfi: true, timeByTag: true, timeOfDay: true, heatmap: true, stressEnergy: true, timeFocused: true, tagPie: true }
+      enabledVisualizations: { sfi: true, timeByTag: true, timeOfDay: true, heatmap: true, stressEnergy: true, timeFocused: true, tagPie: true },
+      enableEpistemicTracking: false,
+      enableInterleaving: false
     }, null, 2));
   }
   return JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -57,10 +59,22 @@ const ensureDataExists = () => {
   if (!fs.existsSync(dataPath)) {
     fs.writeFileSync(dataPath, JSON.stringify({ tags: ["Focus", "Study"], sessions: [], meditations: [] }));
   }
-  // Migrate existing data to include meditations
   const data = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
+  let modified = false;
   if (!data.meditations) {
     data.meditations = [];
+    modified = true;
+  }
+  if (!data.topics) {
+    data.topics = {};
+    if (data.tags) {
+      data.tags.forEach(t => {
+        data.topics[t] = { topicId: t, parentDomain: "Uncategorized", lastStudied: null, historicalTau: 25, averageFrictionRate: 0, lastSessionEndState: null, lastFrictionNote: null };
+      });
+    }
+    modified = true;
+  }
+  if (modified) {
     fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
   }
 };
@@ -249,6 +263,23 @@ app.post('/api/meditations', authMiddleware, (req, res) => {
   res.json({ success: true, session });
 });
 
+app.get('/api/topics', authMiddleware, (req, res) => {
+  const data = readData();
+  res.json(data.topics || {});
+});
+
+app.post('/api/topics/update', authMiddleware, (req, res) => {
+  const data = readData();
+  const { topicId, metadata } = req.body;
+  if (!data.topics) data.topics = {};
+  if (!data.topics[topicId]) {
+    data.topics[topicId] = { topicId, parentDomain: "Uncategorized", lastStudied: null, historicalTau: 25, averageFrictionRate: 0, lastSessionEndState: null, lastFrictionNote: null };
+  }
+  data.topics[topicId] = { ...data.topics[topicId], ...metadata };
+  writeData(data);
+  res.json({ success: true, topic: data.topics[topicId] });
+});
+
 app.delete('/api/meditations/:id', authMiddleware, (req, res) => {
   const data = readData();
   const id = req.params.id;
@@ -289,6 +320,9 @@ app.delete('/api/tags/:tag', authMiddleware, (req, res) => {
   const tag = req.params.tag;
   
   data.tags = data.tags.filter(t => t !== tag);
+  if (data.topics && data.topics[tag]) {
+    delete data.topics[tag];
+  }
   writeData(data);
   
   if (config.tagTargets && config.tagTargets[tag] !== undefined) {
@@ -387,9 +421,13 @@ app.post('/api/import', authMiddleware, (req, res) => {
     });
 
     const mergedTags = [...new Set([...currentData.tags, ...(payload.data.tags || [])])];
+    
+    // Merge topics
+    const mergedTopics = { ...(currentData.topics || {}), ...(payload.data.topics || {}) };
 
     writeData({
       tags: mergedTags,
+      topics: mergedTopics,
       sessions: mergedSessions,
       meditations: mergedMeditations
     });
@@ -399,11 +437,40 @@ app.post('/api/import', authMiddleware, (req, res) => {
     // Overwrite
     const newConf = { ...payload.settings, dataPath: currentConf.dataPath, password: currentConf.password };
     writeConfig(newConf);
-    writeData(payload.data);
+    
+    const finalData = { ...payload.data };
+    if (!finalData.topics && currentData.topics) {
+       finalData.topics = currentData.topics;
+    }
+    
+    writeData(finalData);
     return res.json({ success: true, action: "overwritten", backup: backupPath });
   }
 });
 
+app.delete('/api/data', authMiddleware, (req, res) => {
+  const currentData = readData();
+  const currentConf = readConfig();
+  
+  // Backup before wiping
+  const backupStr = JSON.stringify({ settings: currentConf, data: currentData }, null, 2);
+  const backupPath = path.join(__dirname, `backup_wipe_${Date.now()}.json`);
+  fs.writeFileSync(backupPath, backupStr);
+
+  const freshData = {
+    tags: ["Focus", "Study"],
+    sessions: [],
+    meditations: [],
+    topics: {}
+  };
+  
+  freshData.tags.forEach(t => {
+    freshData.topics[t] = { topicId: t, parentDomain: "Uncategorized", lastStudied: null, historicalTau: 25, averageFrictionRate: 0, lastSessionEndState: null, lastFrictionNote: null };
+  });
+
+  writeData(freshData);
+  res.json({ success: true, backup: backupPath });
+});
 // Custom Audio streaming endpoint
 app.get('/api/audio', authMiddleware, (req, res) => {
   const filePath = req.query.path;

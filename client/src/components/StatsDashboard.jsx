@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Download, Calendar, Trash2, Edit2, PlusCircle, Target } from 'lucide-react';
+import {  Download, Calendar, Trash2, Edit2, PlusCircle, Target , Info } from 'lucide-react';
+import ChartInfoModal from './ChartInfoModal';
 import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
+  ComposedChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
   LineChart, Line, ScatterChart, Scatter, ZAxis, ErrorBar,
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Cell,
   PieChart, Pie, Legend
@@ -11,7 +12,10 @@ import EditSessionModal from './EditSessionModal';
 import { 
   calculateTTFD, calculateMaxFlowBlock, calculateFatigueCurve, 
   calculateRecoveryMetric, calculateTaskResilience, calculateContextSwitchPenalty,
-  calculateStressEnergyCorrelation, calculateFocusTrend
+  calculateStressEnergyCorrelation, calculateFocusTrend,
+  calculateCognitiveExpenditure, generateFrictionHeatmapData, generateEfficiencyCurves, calculateStanceEndurance,
+  calculateEnduranceConstants, calculateKaplanMeier, calculatePhaseSpaceHazard,
+  calculateInterleavingQueue, calculateCognitiveDistanceMatrix, calculateRetrievalLatencyTrend
 } from '../utils/AnalyticsEngine';
 import Heatmap from './Heatmap';
 
@@ -29,6 +33,7 @@ const formatDateShort = (dateStr) => {
 };
 
 export default function StatsDashboard({ isActive, refreshKey, onDataChange, config: propConfig }) {
+  const [activeChartInfo, setActiveChartInfo] = useState(null);
   const [data, setData] = useState({ tags: [], sessions: [], meditations: [] });
   const [config, setConfig] = useState({ tagColors: {}, enabledVisualizations: {} });
   const [dateRange, setDateRange] = useState('30'); // '7', '30', 'all'
@@ -215,8 +220,9 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
       }
       return {
         date,
-        sfi: Math.round(avg),
-        error: Math.round(stdDev)
+        sfi: isNaN(avg) ? null : Math.round(avg),
+        error: isNaN(stdDev) ? null : Math.round(stdDev),
+        sfiRange: isNaN(avg) ? null : [Math.max(0, Math.round(avg - stdDev)), Math.min(100, Math.round(avg + stdDev))]
       };
     });
 
@@ -239,8 +245,8 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
       const avgEnergy = vals.energy.reduce((sum, v) => sum + v, 0) / vals.energy.length;
       return {
         date,
-        stress: Math.round(avgStress * 10) / 10,
-        energy: Math.round(avgEnergy * 10) / 10
+        stress: isNaN(avgStress) ? null : Math.round(avgStress * 10) / 10,
+        energy: isNaN(avgEnergy) ? null : Math.round(avgEnergy * 10) / 10
       };
     });
 
@@ -282,6 +288,10 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
     return result;
   }, [filteredSessions, dateRange]);
 
+  const interleavingQueue = useMemo(() => calculateInterleavingQueue(data.topics || {}, selectedTagFilter !== 'All' ? selectedTagFilter : null, 'INGESTION').slice(0,5), [data.topics, selectedTagFilter]);
+  const cognitiveDistanceData = useMemo(() => calculateCognitiveDistanceMatrix(data.sessions), [data.sessions]);
+  const latencyTrendData = useMemo(() => calculateRetrievalLatencyTrend(data.sessions), [data.sessions]);
+
   const timeOfDayData = useMemo(() => {
     const hourlyMap = Array(24).fill(null).map(() => []);
     
@@ -315,9 +325,11 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
   }, [timeOfDayData]);
 
   const exportCSV = () => {
-    let csv = "Session ID,Goal,Tag,Type,Start Time,End Time,Duration (s),Distractions,SFI\n";
+    let csv = "Session ID,Goal,Tag,Type,Start Time,End Time,Duration (s),Distractions,SFI,EntryTicket Latency (s),Cognitive E,End State\n";
     filteredSessions.forEach(s => {
-      csv += `${s.id},"${s.goal}",${s.tag},${s.type},${s.startTime},${s.endTime},${s.durationActual},${(s.distractions || []).length},${s.sfi}\n`;
+      const totalE = config?.enableEpistemicTracking ? Math.round(calculateCognitiveExpenditure(s).totalE) : '';
+      const endState = s.events && s.events.length > 0 ? s.events[s.events.length - 1].state : '';
+      csv += `${s.id},"${s.goal}",${s.tag},${s.type},${s.startTime},${s.endTime},${s.durationActual},${(s.distractions || []).length},${Math.round(s.sfi || 0)},${s.entryTicketLatency || ''},${totalE},${endState}\n`;
     });
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -352,8 +364,16 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
     const stressEnergyCorr = calculateStressEnergyCorrelation(filteredSessions);
     const focusTrend = calculateFocusTrend(filteredSessions);
     
-    return { avgTTFD, avgMaxFlow, avgRecovery, curve, peakBin, enduranceLimit, resilience, contextPenalties, stressEnergyCorr, focusTrend };
-  }, [filteredSessions]);
+    const frictionHeatmap = config?.enableEpistemicTracking ? generateFrictionHeatmapData(filteredSessions) : { data: [], frictionTypes: [] };
+    const efficiencyCurves = config?.enableEpistemicTracking ? generateEfficiencyCurves(filteredSessions) : [];
+    const stanceEndurance = config?.enableEpistemicTracking ? calculateStanceEndurance(filteredSessions) : [];
+    
+    const enduranceConstants = config?.enableEpistemicTracking ? calculateEnduranceConstants(filteredSessions) : {};
+    const kaplanMeier = config?.enableEpistemicTracking ? calculateKaplanMeier(filteredSessions) : {};
+    const phaseSpaceHazard = config?.enableEpistemicTracking ? calculatePhaseSpaceHazard(filteredSessions) : [];
+    
+    return { avgTTFD, avgMaxFlow, avgRecovery, curve, peakBin, enduranceLimit, resilience, contextPenalties, stressEnergyCorr, focusTrend, frictionHeatmap, efficiencyCurves, stanceEndurance, enduranceConstants, kaplanMeier, phaseSpaceHazard };
+  }, [filteredSessions, config?.enableEpistemicTracking]);
 
   const getHeatmapColor = (val) => {
     if (val === 0) return 'var(--md-sys-color-surface-variant)';
@@ -369,9 +389,12 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
       <div className="md-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
           <h2 style={{ margin: 0 }}>Analytics</h2>
-          <div style={{ display: 'flex', backgroundColor: 'var(--md-sys-color-surface-variant)', borderRadius: '16px', padding: '4px' }}>
+          <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '8px' }}>
             <button className={`tab-btn ${activeTab === 'overview' ? 'active' : ''}`} style={{ padding: '4px 16px', border: 'none' }} onClick={() => setActiveTab('overview')}>Overview</button>
-            <button className={`tab-btn ${activeTab === 'advanced' ? 'active' : ''}`} style={{ padding: '4px 16px', border: 'none' }} onClick={() => setActiveTab('advanced')}>Advanced Insights</button>
+            <button className={`tab-btn ${activeTab === 'advanced' ? 'active' : ''}`} style={{ padding: '4px 16px', border: 'none' }} onClick={() => setActiveTab('advanced')}>Advanced</button>
+            {config?.enableInterleaving && (
+              <button className={`tab-btn ${activeTab === 'interleaving' ? 'active' : ''}`} style={{ padding: '4px 16px', border: 'none' }} onClick={() => setActiveTab('interleaving')}>Interleaving</button>
+            )}
           </div>
           <div style={{ display: 'flex', backgroundColor: 'var(--md-sys-color-surface-variant)', borderRadius: '16px', padding: '4px' }}>
             <button className={`tab-btn ${dateRange === '7' ? 'active' : ''}`} style={{ padding: '4px 16px', border: 'none' }} onClick={() => setDateRange('7')}>7D</button>
@@ -427,18 +450,27 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
           
           <div className="charts-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
             <div className="md-card">
-              <h3 style={{ marginBottom: '8px' }}>Fatigue Curve</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+  <h3 style={{ marginBottom: '8px' }}>Fatigue Curve</h3>
+  <button className="icon-btn" onClick={() => setActiveChartInfo('fatigue-curve')} title="What is this?"><Info size={18} /></button>
+</div>
               {advancedMetrics.peakBin && <p style={{ color: 'var(--md-sys-color-error)', marginBottom: '16px' }}>Cognitive Cliff: <strong>{advancedMetrics.peakBin.label}</strong></p>}
               <div style={{ height: '300px' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={advancedMetrics.curve}>
+                {(!advancedMetrics.curve || advancedMetrics.curve.length === 0) ? (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--md-sys-color-on-surface-variant)' }}>
+        No data available yet. Keep logging sessions!
+      </div>
+    ) : (
+      <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={advancedMetrics.curve} margin={{ top: 20, right: 30, left: 0, bottom: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--md-sys-color-outline)" opacity={0.2} />
-                    <XAxis dataKey="label" stroke="var(--md-sys-color-on-surface-variant)" fontSize={12} />
-                    <YAxis stroke="var(--md-sys-color-on-surface-variant)" fontSize={12} />
-                    <Tooltip cursor={{fill: 'var(--md-sys-color-surface-variant)', opacity: 0.5}} contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)' }} />
+                    <XAxis dataKey="label" stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} />
+                    <YAxis stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} />
+                    <Tooltip formatter={(value) => typeof value === 'number' ? parseFloat(value.toFixed(2)) : value} cursor={{fill: 'var(--md-sys-color-surface-variant)', opacity: 0.5}} contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)' }} />
                     <Bar dataKey="count" name="Distractions" fill="var(--md-sys-color-primary)" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
+    )}
               </div>
             </div>
             
@@ -475,6 +507,202 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
               </ul>
             )}
           </div>
+
+          {config?.enableEpistemicTracking && (
+            <>
+              <div className="md-card" style={{ marginTop: '24px' }}>
+                <h3 style={{ marginBottom: '16px' }}>Friction Heatmap (Topic vs Friction Type)</h3>
+                <div style={{ height: '300px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={advancedMetrics.frictionHeatmap.data} layout="vertical" margin={{ top: 20, right: 30, left: 0, bottom: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--md-sys-color-outline)" opacity={0.2} />
+                      <XAxis type="number" stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} />
+                      <YAxis type="category" dataKey="topic" stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} width={100} />
+                      <Tooltip formatter={(value) => typeof value === 'number' ? parseFloat(value.toFixed(2)) : value} contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
+                      <Legend />
+                      {advancedMetrics.frictionHeatmap.frictionTypes.map((ft, i) => (
+                        <Bar key={ft} dataKey={ft} stackId="a" fill={['var(--md-sys-color-error)', 'var(--md-sys-color-secondary)', 'var(--md-sys-color-tertiary)', '#ff9800'][i % 4]} />
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              
+              <div className="md-card" style={{ marginTop: '24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+  <h3 style={{ marginBottom: '16px' }}>Focus Survival Probability (Kaplan-Meier)</h3>
+  <button className="icon-btn" onClick={() => setActiveChartInfo('kaplan-meier')} title="What is this?"><Info size={18} /></button>
+</div>
+                <div style={{ height: '300px' }}>
+                  {Object.keys(advancedMetrics.kaplanMeier).length === 0 ? (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--md-sys-color-on-surface-variant)' }}>
+      No data available yet. Keep logging sessions!
+    </div>
+  ) : (
+    <ResponsiveContainer width="100%" height="100%">
+                    <LineChart margin={{ top: 20, right: 30, left: 0, bottom: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--md-sys-color-outline)" opacity={0.2} />
+                      <XAxis type="number" dataKey="time" name="Time (m)" unit="m" stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} allowDuplicatedCategory={false} />
+                      <YAxis type="number" dataKey="survival" name="Probability" stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} domain={[0, 1]} />
+                      <Tooltip formatter={(value) => typeof value === 'number' ? parseFloat(value.toFixed(2)) : value} contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
+                      <Legend />
+                      {Object.keys(advancedMetrics.kaplanMeier).map((state, i) => (
+                         <Line key={state} type="stepAfter" dataKey="survival" data={advancedMetrics.kaplanMeier[state]} name={state} stroke={['#4caf50', '#f44336', '#2196f3', '#ff9800'][i % 4]} strokeWidth={2} dot={false} />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+  )}
+                </div>
+              </div>
+              
+              <div className="charts-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginTop: '24px' }}>
+                <div className="md-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+  <h3 style={{ marginBottom: '16px' }}>Efficiency Curves (Duration vs E)</h3>
+  <button className="icon-btn" onClick={() => setActiveChartInfo('efficiency-curves')} title="What is this?"><Info size={18} /></button>
+</div>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)' }}>Slope indicates focus decay rate.</p>
+                  <div style={{ height: '300px' }}>
+                    {(!advancedMetrics.efficiencyCurves || advancedMetrics.efficiencyCurves.length === 0) ? <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.9rem' }}>No data available for this period.</div> : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ScatterChart margin={{ top: 20, right: 30, left: 0, bottom: 20 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--md-sys-color-outline)" opacity={0.2} />
+                        <XAxis type="number" dataKey="durationMins" name="Duration (m)" unit="m" stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} />
+                        <YAxis type="number" dataKey="E" name="Cognitive E" stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} />
+                        <Tooltip formatter={(value) => typeof value === 'number' ? parseFloat(value.toFixed(2)) : value} cursor={{strokeDasharray: '3 3'}} contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
+                        <Scatter name="Sessions" data={advancedMetrics.efficiencyCurves} fill="var(--md-sys-color-primary)" />
+                      </ScatterChart>
+                    </ResponsiveContainer>
+                )}
+                  </div>
+                </div>
+
+                <div className="md-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+  <h3 style={{ marginBottom: '16px' }}>Epistemic Endurance & Distraction Rate</h3>
+  <button className="icon-btn" onClick={() => setActiveChartInfo('epistemic-endurance')} title="What is this?"><Info size={18} /></button>
+</div>
+                  <div style={{ height: '300px', overflowY: 'auto' }}>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                      {advancedMetrics.stanceEndurance.map(se => (
+                        <li key={se.stance} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', borderBottom: '1px solid var(--md-sys-color-outline)' }}>
+                          <strong style={{ fontSize: '1.1rem' }}>{se.stance}</strong>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.9rem' }}>
+                            <span>Total Time: <strong>{se.totalMinutes} mins</strong></span>
+                            <span>Distraction Rate: <strong>{se.distractionRate.toFixed(1)} / hr</strong></span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div className="charts-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginTop: '24px' }}>
+                <div className="md-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+  <h3 style={{ marginBottom: '16px' }}>Phase Space Hazard Plot</h3>
+  <button className="icon-btn" onClick={() => setActiveChartInfo('phase-space-hazard')} title="What is this?"><Info size={18} /></button>
+</div>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--md-sys-color-on-surface-variant)' }}>λ (distractions/10m) vs Session Duration. Spikes indicate "collapse".</p>
+                  <div style={{ height: '300px' }}>
+                    {(!advancedMetrics.phaseSpaceHazard || advancedMetrics.phaseSpaceHazard.length === 0) ? <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.9rem' }}>No data available for this period.</div> : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ScatterChart margin={{ top: 20, right: 30, left: 0, bottom: 20 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--md-sys-color-outline)" opacity={0.2} />
+                        <XAxis type="number" dataKey="durationMins" name="Duration" unit="m" stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} />
+                        <YAxis type="number" dataKey="hazardRate" name="Local λ" stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} />
+                        <Tooltip formatter={(value) => typeof value === 'number' ? parseFloat(value.toFixed(2)) : value} cursor={{strokeDasharray: '3 3'}} contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
+                        <Scatter name="Hazard" data={advancedMetrics.phaseSpaceHazard} fill="var(--md-sys-color-error)" />
+                      </ScatterChart>
+                    </ResponsiveContainer>
+                )}
+                  </div>
+                </div>
+
+                <div className="md-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+  <h3 style={{ marginBottom: '16px' }}>Dynamic Endurance Baselines (τ)</h3>
+  <button className="icon-btn" onClick={() => setActiveChartInfo('dynamic-endurance')} title="What is this?"><Info size={18} /></button>
+</div>
+                  <div style={{ height: '300px', overflowY: 'auto' }}>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                      {Object.entries(advancedMetrics.enduranceConstants).map(([topic, tau]) => (
+                        <li key={topic} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', borderBottom: '1px solid var(--md-sys-color-outline)' }}>
+                          <strong style={{ fontSize: '1.1rem' }}>{topic}</strong>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.9rem' }}>
+                            <span>Empirical Baseline (τ): <strong style={{ color: 'var(--md-sys-color-primary)' }}>{typeof tau === 'number' ? parseFloat(tau.toFixed(1)) : tau} mins</strong></span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="md-card" style={{ marginTop: '24px' }}>
+                <h3 style={{ marginBottom: '16px' }}>Session Gantt (Micro-Analysis - Last 5 Sessions)</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {filteredSessions.filter(s => s.events && s.events.length > 0 && s.durationActual > 0).length === 0 ? (
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.9rem' }}>No data available for this period.</div>
+                  ) : filteredSessions.slice(-5).reverse().map(s => {
+                    if (!s.events || s.events.length === 0 || s.durationActual <= 0) return null;
+                    const sessionStart = new Date(s.startTime).getTime();
+                    const sessionEnd = s.endTime ? new Date(s.endTime).getTime() : sessionStart + s.durationActual * 1000;
+                    const totalDurMs = sessionEnd - sessionStart;
+                    if (totalDurMs <= 0) return null;
+                    
+                    const segments = [];
+                    const frictionMarkers = [];
+                    let currentState = null;
+                    let stateStartMs = sessionStart;
+                    
+                    s.events.forEach(e => {
+                      const t = new Date(e.timestamp).getTime();
+                      if (e.type === 'STATE_CHANGE') {
+                        if (currentState) {
+                           segments.push({ state: currentState, width: ((t - stateStartMs) / totalDurMs) * 100 });
+                        }
+                        currentState = e.state;
+                        stateStartMs = t;
+                      } else if (e.type === 'FRICTION_LOG') {
+                        frictionMarkers.push({ type: e.frictionType, left: ((t - sessionStart) / totalDurMs) * 100 });
+                      } else if (e.type === 'SESSION_END') {
+                        if (currentState) {
+                           segments.push({ state: currentState, width: ((t - stateStartMs) / totalDurMs) * 100 });
+                           currentState = null;
+                        }
+                      }
+                    });
+                    
+                    if (currentState && stateStartMs < sessionEnd) {
+                       segments.push({ state: currentState, width: ((sessionEnd - stateStartMs) / totalDurMs) * 100 });
+                    }
+                    
+                    const stateColors = { INGESTION: '#4caf50', SYMBOL_MANIPULATION: '#f44336', SENSE_MAKING: '#2196f3', TRANSLATION: '#ff9800' };
+
+                    return (
+                      <div key={s.id} style={{ marginBottom: '8px' }}>
+                        <div style={{ fontSize: '0.8rem', opacity: 0.8, marginBottom: '4px', display: 'flex', justifyContent: 'space-between' }}>
+                          <span>{new Date(s.startTime).toLocaleString()} - {s.goal}</span>
+                          <span style={{color: 'var(--md-sys-color-primary)'}}>E: {Math.round(calculateCognitiveExpenditure(s).totalE)}</span>
+                        </div>
+                        <div style={{ position: 'relative', width: '100%', height: '24px', backgroundColor: 'var(--md-sys-color-surface-variant)', borderRadius: '4px', overflow: 'hidden', display: 'flex' }}>
+                          {segments.map((seg, i) => (
+                             <div key={i} style={{ width: `${seg.width}%`, height: '100%', backgroundColor: stateColors[seg.state] || 'gray' }} title={seg.state} />
+                          ))}
+                          {frictionMarkers.map((fm, i) => (
+                             <div key={i} style={{ position: 'absolute', left: `${fm.left}%`, top: 0, bottom: 0, width: '2px', backgroundColor: '#fff', borderLeft: '1px solid #000' }} title={`Friction: ${fm.type}`} />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+
         </div>
       ) : (
         <>
@@ -513,17 +741,18 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
           <div className="md-card">
             <h3 style={{ marginBottom: '24px' }}>Focus Quality (SFI) Over Time</h3>
             <div style={{ height: '300px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={sfiData}>
+              {(!sfiData || sfiData.length === 0) ? <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.9rem' }}>No data available for this period.</div> : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={sfiData} margin={{ top: 20, right: 30, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--md-sys-color-outline)" opacity={0.2} />
-                  <XAxis dataKey="date" stroke="var(--md-sys-color-on-surface-variant)" fontSize={12} tickMargin={10} tickFormatter={formatDateShort} />
-                  <YAxis domain={[0, 100]} stroke="var(--md-sys-color-on-surface-variant)" fontSize={12} />
-                  <Tooltip contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
-                  <Line type="monotone" dataKey="sfi" name="Average SFI" stroke="var(--md-sys-color-primary)" strokeWidth={3} dot={{ r: 4, fill: 'var(--md-sys-color-primary)' }}>
-                     <ErrorBar dataKey="error" width={4} strokeWidth={2} stroke="var(--md-sys-color-primary)" />
-                  </Line>
-                </LineChart>
+                  <XAxis dataKey="date" stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} tickMargin={10} tickFormatter={formatDateShort} />
+                  <YAxis domain={[0, 100]} stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} />
+                  <Tooltip formatter={(value) => typeof value === 'number' ? parseFloat(value.toFixed(2)) : value} contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
+                  <Area type="monotone" dataKey="sfiRange" fill="var(--md-sys-color-primary)" stroke="none" fillOpacity={0.2} connectNulls={true} />
+                  <Line type="monotone" dataKey="sfi" name="Average SFI" stroke="var(--md-sys-color-primary)" strokeWidth={3} dot={{ r: 4, fill: 'var(--md-sys-color-primary)' }} connectNulls={true} />
+                </ComposedChart>
               </ResponsiveContainer>
+                )}
             </div>
           </div>
         )}
@@ -533,12 +762,13 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
           <div className="md-card">
             <h3 style={{ marginBottom: '24px' }}>Time by Tag (Minutes)</h3>
             <div style={{ height: '300px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={barData}>
+              {(!barData || barData.length === 0) ? <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.9rem' }}>No data available for this period.</div> : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={barData} margin={{ top: 20, right: 30, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--md-sys-color-outline)" opacity={0.2} />
-                  <XAxis dataKey="name" stroke="var(--md-sys-color-on-surface-variant)" fontSize={12} />
-                  <YAxis stroke="var(--md-sys-color-on-surface-variant)" fontSize={12} />
-                  <Tooltip cursor={{fill: 'var(--md-sys-color-surface-variant)', opacity: 0.5}} contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
+                  <XAxis dataKey="name" stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} />
+                  <YAxis stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} />
+                  <Tooltip formatter={(value) => typeof value === 'number' ? parseFloat(value.toFixed(2)) : value} cursor={{fill: 'var(--md-sys-color-surface-variant)', opacity: 0.5}} contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
                   <Bar dataKey="minutes" radius={[4, 4, 0, 0]}>
                     {barData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={(config.tagColors && config.tagColors[entry.name]) ? config.tagColors[entry.name] : 'var(--md-sys-color-primary)'} />
@@ -546,6 +776,7 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
+                )}
             </div>
           </div>
         )}
@@ -553,17 +784,22 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
         {/* Time of Day Focus Profile */}
         {config.enabledVisualizations?.timeOfDay !== false && (
           <div className="md-card">
-            <h3 style={{ marginBottom: '24px' }}>Time-of-Day Focus Profile (All Time)</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0 }}>Time-of-Day Focus Profile ({dateRange === 'all' ? 'All Time' : `Last ${dateRange} Days`})</h3>
+              <button className="icon-btn" onClick={() => setActiveChartInfo('time-of-day')} title="What is this?"><Info size={18} /></button>
+            </div>
             <div style={{ height: '300px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <RadarChart data={timeOfDayData}>
+              {(!timeOfDayData || timeOfDayData.length === 0) ? <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.9rem' }}>No data available for this period.</div> : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadarChart data={timeOfDayData}>
                   <PolarGrid stroke="var(--md-sys-color-outline)" opacity={0.3} />
                   <PolarAngleAxis dataKey="hour" tick={{ fill: 'var(--md-sys-color-on-surface-variant)', fontSize: 10 }} />
                   <PolarRadiusAxis domain={[0, maxTimeOfDaySfi]} angle={90} tick={{ fill: 'var(--md-sys-color-on-surface-variant)', fontSize: 10 }} orientation="middle" />
-                  <Tooltip contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
+                  <Tooltip formatter={(value) => typeof value === 'number' ? parseFloat(value.toFixed(2)) : value} contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
                   <Radar name="Average SFI" dataKey="avgSfi" stroke="#ffb300" fill="#ffb300" fillOpacity={0.5} />
                 </RadarChart>
               </ResponsiveContainer>
+                )}
             </div>
           </div>
         )}
@@ -573,17 +809,19 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
           <div className="md-card">
             <h3 style={{ marginBottom: '24px' }}>Stress & Energy Over Time</h3>
             <div style={{ height: '300px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={stressEnergyData}>
+              {(!stressEnergyData || stressEnergyData.length === 0) ? <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.9rem' }}>No data available for this period.</div> : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={stressEnergyData} margin={{ top: 20, right: 30, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--md-sys-color-outline)" opacity={0.2} />
-                  <XAxis dataKey="date" stroke="var(--md-sys-color-on-surface-variant)" fontSize={12} tickMargin={10} tickFormatter={formatDateShort} />
-                  <YAxis domain={[1, 5]} stroke="var(--md-sys-color-on-surface-variant)" fontSize={12} />
-                  <Tooltip contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
+                  <XAxis dataKey="date" stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} tickMargin={10} tickFormatter={formatDateShort} />
+                  <YAxis domain={[1, 5]} stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} />
+                  <Tooltip formatter={(value) => typeof value === 'number' ? parseFloat(value.toFixed(2)) : value} contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
                   <Legend />
                   <Line type="monotone" dataKey="stress" name="Avg Stress" stroke="var(--md-sys-color-error)" strokeWidth={3} dot={{ r: 4 }} />
                   <Line type="monotone" dataKey="energy" name="Avg Energy" stroke="#4caf50" strokeWidth={3} dot={{ r: 4 }} />
                 </LineChart>
               </ResponsiveContainer>
+                )}
             </div>
           </div>
         )}
@@ -593,15 +831,17 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
           <div className="md-card">
             <h3 style={{ marginBottom: '24px' }}>Daily Focus Time (Minutes)</h3>
             <div style={{ height: '300px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dailyFocusTimeData}>
+              {(!dailyFocusTimeData || dailyFocusTimeData.length === 0) ? <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.9rem' }}>No data available for this period.</div> : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dailyFocusTimeData} margin={{ top: 20, right: 30, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--md-sys-color-outline)" opacity={0.2} />
-                  <XAxis dataKey="date" stroke="var(--md-sys-color-on-surface-variant)" fontSize={12} tickFormatter={formatDateShort} />
-                  <YAxis stroke="var(--md-sys-color-on-surface-variant)" fontSize={12} />
-                  <Tooltip cursor={{fill: 'var(--md-sys-color-surface-variant)', opacity: 0.5}} contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
+                  <XAxis dataKey="date" stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} tickFormatter={formatDateShort} />
+                  <YAxis stroke="var(--md-sys-color-on-surface-variant)" fill="var(--md-sys-color-on-surface-variant)" fontSize={12} />
+                  <Tooltip formatter={(value) => typeof value === 'number' ? parseFloat(value.toFixed(2)) : value} cursor={{fill: 'var(--md-sys-color-surface-variant)', opacity: 0.5}} contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
                   <Bar dataKey="val" name="Minutes" fill="var(--md-sys-color-primary)" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
+                )}
             </div>
           </div>
         )}
@@ -611,9 +851,10 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
           <div className="md-card">
             <h3 style={{ marginBottom: '24px' }}>Time by Tag Distribution</h3>
             <div style={{ height: '300px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Tooltip contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
+              {(!tagPieData || tagPieData.length === 0) ? <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.9rem' }}>No data available for this period.</div> : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                  <Tooltip formatter={(value) => typeof value === 'number' ? parseFloat(value.toFixed(2)) : value} contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
                   <Legend />
                   <Pie
                     data={tagPieData}
@@ -630,10 +871,76 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
                   </Pie>
                 </PieChart>
               </ResponsiveContainer>
+                )}
             </div>
           </div>
         )}
       </div>
+
+      {activeTab === 'interleaving' && (
+        <>
+          <div className="md-card" style={{ marginBottom: '32px' }}>
+            <h3 style={{ marginBottom: '16px' }}>Interleaved Timeline (Future-Cast)</h3>
+            <p style={{ color: 'var(--md-sys-color-on-surface-variant)', marginBottom: '24px' }}>Dynamically generated queue of topics optimized for schema retention.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {interleavingQueue.length === 0 ? <p>No active topics to interleave.</p> : interleavingQueue.map((t, i) => (
+                <div key={t.topicId} style={{ display: 'flex', justifyContent: 'space-between', padding: '16px', backgroundColor: 'var(--md-sys-color-surface-variant)', borderRadius: '8px' }}>
+                  <div>
+                    <div style={{ fontWeight: 'bold', fontSize: '1.1rem', color: 'var(--md-sys-color-primary)' }}>{i + 1}. {t.topicId}</div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--md-sys-color-on-surface-variant)' }}>Last State: {t.lastSessionEndState || 'Unknown'} • Priority: {Math.round(t.priorityScore)}</div>
+                  </div>
+                  {t.lastFrictionNote && <div style={{ fontSize: '0.85rem', fontStyle: 'italic', maxWidth: '300px', textAlign: 'right', color: 'var(--md-sys-color-on-surface-variant)' }}>"{t.lastFrictionNote}"</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '32px', marginBottom: '32px' }}>
+            <div className="md-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+  <h3 style={{ marginBottom: '24px' }}>Cognitive Distance Matrix</h3>
+  <button className="icon-btn" onClick={() => setActiveChartInfo('cognitive-distance')} title="What is this?"><Info size={18} /></button>
+</div>
+              <p style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.85rem', marginBottom: '16px' }}>Frequency of topic pairings indicating schema intertwining.</p>
+              <div style={{ height: '300px' }}>
+                {(!cognitiveDistanceData || cognitiveDistanceData.length === 0) ? <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.9rem' }}>No data available for this period.</div> : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                    <CartesianGrid />
+                    <XAxis type="category" dataKey="source" name="Topic A" />
+                    <YAxis type="category" dataKey="target" name="Topic B" />
+                    <ZAxis type="number" dataKey="count" range={[100, 1000]} name="Transitions" />
+                    <Tooltip formatter={(value) => typeof value === 'number' ? parseFloat(value.toFixed(2)) : value} cursor={{ strokeDasharray: '3 3' }} />
+                    <Scatter name="Pairings" data={cognitiveDistanceData} fill="var(--md-sys-color-primary)" />
+                  </ScatterChart>
+                </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+
+            <div className="md-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+  <h3 style={{ marginBottom: '24px' }}>Retrieval Latency Trend</h3>
+  <button className="icon-btn" onClick={() => setActiveChartInfo('retrieval-latency')} title="What is this?"><Info size={18} /></button>
+</div>
+              <p style={{ color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.85rem', marginBottom: '16px' }}>Time taken to resolve Entry Tickets over time (lower is better).</p>
+              <div style={{ height: '300px' }}>
+                {(!latencyTrendData || latencyTrendData.length === 0) ? <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.9rem' }}>No data available for this period.</div> : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={latencyTrendData} margin={{ top: 20, right: 30, left: 0, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--md-sys-color-outline)" />
+                    <XAxis dataKey="date" stroke="var(--md-sys-color-on-surface)" />
+                    <YAxis stroke="var(--md-sys-color-on-surface)" label={{ value: 'Seconds', angle: -90, position: 'insideLeft' }} />
+                    <Tooltip formatter={(value) => typeof value === 'number' ? parseFloat(value.toFixed(2)) : value} contentStyle={{ backgroundColor: 'var(--md-sys-color-surface)', border: '1px solid var(--md-sys-color-outline)', borderRadius: '8px' }} />
+                    <Line type="monotone" dataKey="latencySeconds" stroke="var(--md-sys-color-tertiary)" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Activity Timeline */}
       <div className="md-card" style={{ padding: '32px' }}>
@@ -730,6 +1037,13 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
           session={editSession}
           onClose={() => setEditSession(null)}
           onSave={() => { setEditSession(null); if (onDataChange) onDataChange(); }}
+        />
+      )}
+
+      {activeChartInfo && (
+        <ChartInfoModal 
+          chartId={activeChartInfo} 
+          onClose={() => setActiveChartInfo(null)} 
         />
       )}
     </div>

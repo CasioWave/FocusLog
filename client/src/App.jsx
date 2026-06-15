@@ -4,11 +4,13 @@ import Timer from './components/Timer';
 import MeditationTimer from './components/MeditationTimer';
 import StatsDashboard from './components/StatsDashboard';
 import SettingsModal from './components/SettingsModal';
+import TutorialModal from './components/TutorialModal';
 
 function App() {
   const [config, setConfig] = useState(null);
   const [activeTab, setActiveTab] = useState('timer'); // 'timer', 'meditation', 'stats'
   const [showSettings, setShowSettings] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [passwordInput, setPasswordInput] = useState('');
@@ -24,6 +26,20 @@ function App() {
         }
         if (data.accentHue !== undefined) {
           document.documentElement.style.setProperty('--hue-primary', data.accentHue);
+        }
+        if (data.backgroundImage && data.backgroundImage !== 'none') {
+          const bgUrl = data.backgroundImage === 'custom' ? data.customBackgroundImage : data.backgroundImage;
+          if (bgUrl) {
+            document.body.style.backgroundImage = `url('${bgUrl}')`;
+            document.body.style.backgroundSize = 'cover';
+            document.body.style.backgroundPosition = 'center';
+            document.body.style.backgroundAttachment = 'fixed';
+          }
+        } else {
+          document.body.style.backgroundImage = '';
+          document.body.style.backgroundSize = '';
+          document.body.style.backgroundPosition = '';
+          document.body.style.backgroundAttachment = '';
         }
       })
       .catch(console.error);
@@ -102,6 +118,9 @@ function App() {
           FocusLog
         </h1>
         <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="icon-btn" onClick={() => setShowTutorial(true)} aria-label="Tutorial" style={{ color: 'var(--md-sys-color-primary)' }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: 'bold', marginRight: '4px' }}>Help</span>
+          </button>
           <button className="icon-btn" onClick={() => setShowSettings(true)} aria-label="Settings">
             <Settings size={24} />
           </button>
@@ -156,6 +175,10 @@ function App() {
             setShowSettings(false);
           }} 
         />
+      )}
+
+      {showTutorial && (
+        <TutorialModal onClose={() => setShowTutorial(false)} />
       )}
     </>
   );
