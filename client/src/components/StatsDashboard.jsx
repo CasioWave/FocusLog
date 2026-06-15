@@ -513,6 +513,9 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
               <div className="md-card" style={{ marginTop: '24px' }}>
                 <h3 style={{ marginBottom: '16px' }}>Friction Heatmap (Topic vs Friction Type)</h3>
                 <div style={{ height: '300px' }}>
+                  {(!advancedMetrics.frictionHeatmap.data || advancedMetrics.frictionHeatmap.data.length === 0) ? (
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--md-sys-color-on-surface-variant)', fontSize: '0.9rem' }}>No data available for this period.</div>
+                  ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={advancedMetrics.frictionHeatmap.data} layout="vertical" margin={{ top: 20, right: 30, left: 0, bottom: 20 }}>
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--md-sys-color-outline)" opacity={0.2} />
@@ -525,6 +528,7 @@ export default function StatsDashboard({ isActive, refreshKey, onDataChange, con
                       ))}
                     </BarChart>
                   </ResponsiveContainer>
+                  )}
                 </div>
               </div>
               

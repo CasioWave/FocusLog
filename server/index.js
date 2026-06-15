@@ -3,6 +3,7 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const { spawn } = require('child_process');
 const { Server } = require('socket.io');
 
 const app = express();
@@ -495,6 +496,27 @@ app.delete('/api/data', authMiddleware, (req, res) => {
   writeData(freshData);
   res.json({ success: true, backup: backupPath });
 });
+
+app.post('/api/system/shutdown', authMiddleware, (req, res) => {
+  res.json({ success: true, message: "Shutting down..." });
+  setTimeout(() => {
+    process.exit(0);
+  }, 1000);
+});
+
+app.post('/api/system/restart', authMiddleware, (req, res) => {
+  res.json({ success: true, message: "Restarting..." });
+  setTimeout(() => {
+    const runScript = path.join(__dirname, '..', 'run.sh');
+    const child = spawn(runScript, ['--no-browser'], {
+      detached: true,
+      stdio: 'ignore'
+    });
+    child.unref();
+    process.exit(0);
+  }, 1000);
+});
+
 // Custom Audio streaming endpoint
 app.get('/api/audio', authMiddleware, (req, res) => {
   const filePath = req.query.path;

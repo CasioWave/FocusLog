@@ -287,7 +287,7 @@ export default function Timer({ refreshKey }) {
   };
 
   useEffect(() => {
-    if (sessionState === 'running' && config.smartBreakPrompts && !smartBreakPrompted) {
+    if (sessionState === 'running' && config.smartBreakPrompts && !smartBreakPrompted && allSessions.length >= 3) {
       const promptMinute = Math.max(5, Math.floor(enduranceLimit) - 5);
       
       if (Math.floor(timeElapsed / 60) === promptMinute) {
@@ -303,7 +303,7 @@ export default function Timer({ refreshKey }) {
   }, [timeElapsed, sessionState, config.smartBreakPrompts, enduranceLimit, smartBreakPrompted]);
 
   useEffect(() => {
-    if (sessionState === 'running' && config.enableEpistemicTracking && currentTau) {
+    if (sessionState === 'running' && config.enableEpistemicTracking && currentTau && allSessions.length >= 3) {
        const zTime = currentTau * 0.85;
        if (timeElapsed / 60 >= zTime && !zeigarnikTriggered) {
           setZeigarnikTriggered(true);

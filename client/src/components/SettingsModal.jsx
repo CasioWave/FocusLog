@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Save, Trash2, Plus, Palette, Bell, Target, Lock, Database, Wind, Monitor, Download, Upload } from 'lucide-react';
+import { X, Save, Trash2, Plus, Palette, Bell, Target, Lock, Database, Wind, Monitor, Download, Upload, Power, RefreshCw } from 'lucide-react';
 
 export default function SettingsModal({ onClose, onSave }) {
   const [config, setConfig] = useState({ 
@@ -279,6 +279,60 @@ export default function SettingsModal({ onClose, onSave }) {
                       }}
                     >
                       <Trash2 size={18} /> Wipe All Data
+                    </button>
+                  </div>
+
+                  <h3 style={{ marginBottom: '16px', marginTop: '32px', color: 'var(--md-sys-color-error)' }}>System Controls</h3>
+                  <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                    <button 
+                      className="md-button md-button-secondary"
+                      style={{ flex: 1, backgroundColor: 'rgba(255, 152, 0, 0.1)', color: '#ff9800', borderColor: '#ff9800' }}
+                      onClick={async () => {
+                        const confirmed = window.confirm("Are you sure you want to restart the background server?");
+                        if (confirmed) {
+                          try {
+                            const password = localStorage.getItem('focuslog_password') || '';
+                            const res = await fetch('/api/system/restart', { method: 'POST', headers: { 'x-focuslog-password': password } });
+                            const result = await res.json();
+                            if (result.success) {
+                              alert("Server is restarting. The page will reload in a few seconds.");
+                              setTimeout(() => window.location.reload(), 3000);
+                            } else {
+                              alert('Failed to restart: ' + (result.error || 'Unknown error'));
+                            }
+                          } catch (err) {
+                            alert('Failed to restart: ' + err.message);
+                          }
+                        }
+                      }}
+                    >
+                      <RefreshCw size={18} /> Restart Server
+                    </button>
+
+                    <button 
+                      className="md-button md-button-secondary"
+                      style={{ flex: 1, backgroundColor: 'rgba(244, 67, 54, 0.1)', color: 'var(--md-sys-color-error)', borderColor: 'var(--md-sys-color-error)' }}
+                      onClick={async () => {
+                        const confirmed = window.confirm("Are you sure you want to shutdown the background server? You will need to start it manually later.");
+                        if (confirmed) {
+                          try {
+                            const password = localStorage.getItem('focuslog_password') || '';
+                            const res = await fetch('/api/system/shutdown', { method: 'POST', headers: { 'x-focuslog-password': password } });
+                            const result = await res.json();
+                            if (result.success) {
+                              alert("Server is shutting down. You can safely close this window.");
+                              // Try to close window if allowed
+                              try { window.close(); } catch(e){}
+                            } else {
+                              alert('Failed to shutdown: ' + (result.error || 'Unknown error'));
+                            }
+                          } catch (err) {
+                            alert('Failed to shutdown: ' + err.message);
+                          }
+                        }
+                      }}
+                    >
+                      <Power size={18} /> Shutdown Server
                     </button>
                   </div>
 
