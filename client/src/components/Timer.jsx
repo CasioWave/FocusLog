@@ -263,11 +263,13 @@ export default function Timer({ refreshKey }) {
              audioController.stopBell();
              audioController.playBell(true); 
              if (timeElapsed < 300) {
+                 console.log("[Timer] Session finished, elapsed < 300, sending finalizeSession(0)");
                  const tm = setTimeout(() => {
                      socketRef.current.emit('finalizeSession', 0);
                  }, 4000);
                  return () => clearTimeout(tm);
              } else {
+                 console.log("[Timer] Session finished, elapsed >= 300, showing PostSessionModal", { timeElapsed, sessionData });
                  setPendingSessionData({ endTime: new Date().toISOString(), actualElapsedSeconds: timeElapsed });
                  setShowPostModal(true);
                  if ("Notification" in window && Notification.permission === "granted") {
@@ -422,10 +424,33 @@ export default function Timer({ refreshKey }) {
   };
 
   const finalizeSession = async (notes, breakDuration) => {
-    setShowPostModal(false);
-    const { endTime, actualElapsedSeconds } = pendingSessionData;
-    const sfi = computeSFI(sessionData.startTime || new Date(Date.now() - actualElapsedSeconds * 1000).toISOString(), endTime, distractions);
+    console.log("[Timer] finalizeSession called", { notes, breakDuration, pendingSessionData, sessionData });
+    try {
+      setShowPostModal(false);
+      const { endTime, actualElapsedSeconds } = pendingSessionData;
+      console.log("[Timer] Extracted pendingSessionData", { endTime, actualElapsedSeconds });
+      
+      const sfi = computeSFI(sessionData.startTime || new Date(Date.now() - actualElapsedSeconds * 1000).toISOString(), endTime, distractions);
+      console.log("[Timer] Computed SFI", sfi);
+      
+      const finalData = {
+        ...sessionData,
+        startTime: sessionData.startTime || new Date(Date.now() - actualElapsedSeconds * 1000).toISOString(),
+        endTime,
+        durationActual: actualElapsedSeconds,
+        distractions,
+        events: [...localEvents, { timestamp: endTime || new Date().toISOString(), type: 'SESSION_END' }],
+        sfi,
+        notes
+      };
+      if (entryTicketLatency) finalData.entryTicketLatency = entryTicketLatency;
+      console.log("[Timer] Preparing to send finalData", finalData);
+    } catch (syncErr) {
+      console.error("[Timer] SYNCHRONOUS ERROR IN finalizeSession:", syncErr);
+    }
     
+    // We re-declare finalData since we put it in try-catch to log errors
+    const { endTime, actualElapsedSeconds } = pendingSessionData;
     const finalData = {
       ...sessionData,
       startTime: sessionData.startTime || new Date(Date.now() - actualElapsedSeconds * 1000).toISOString(),
@@ -433,12 +458,13 @@ export default function Timer({ refreshKey }) {
       durationActual: actualElapsedSeconds,
       distractions,
       events: [...localEvents, { timestamp: endTime || new Date().toISOString(), type: 'SESSION_END' }],
-      sfi,
+      sfi: computeSFI(sessionData.startTime || new Date(Date.now() - actualElapsedSeconds * 1000).toISOString(), endTime, distractions),
       notes
     };
     if (entryTicketLatency) finalData.entryTicketLatency = entryTicketLatency;
-    
+
     try {
+      console.log("[Timer] Fetching /api/sessions...");
       await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-focuslog-password': config.password || '' },
@@ -466,11 +492,13 @@ export default function Timer({ refreshKey }) {
         });
       }
       
+      console.log("[Timer] fetchStats called");
       fetchStats(); 
     } catch (e) {
-      console.error(e);
+      console.error("[Timer] Error in finalizeSession requests:", e);
     }
     
+    console.log("[Timer] Finalizing cleanup and emitting to server", breakDuration);
     setPendingSessionData(null);
     socketRef.current.emit('finalizeSession', breakDuration);
   };
@@ -788,7 +816,7 @@ export default function Timer({ refreshKey }) {
       {/* Modals */}
       {showPreModal && <PreSessionModal onStart={handleStart} onCancel={() => setShowPreModal(false)} config={config} />}
       {showDistractionModal && <DistractionModal onLog={handleDistractionLog} onCancel={() => setShowDistractionModal(false)} />}
-      {showPostModal && <PostSessionModal sessionData={pendingSessionData} onFinalize={finalizeSession} />}
+      {showPostModal && <PostSessionModal sessionData={pendingSessionData} onSave={finalizeSession} />}
       {showFrictionModal && <FrictionModal onLog={handleFrictionLog} onCancel={() => setShowFrictionModal(false)} />}
       {showContextSwitchModal && <ContextSwitchModal proposedTopic={proposedSwitchTopic} suggestedState={proposedSwitchState} onAccept={handleAcceptSwitch} onSnooze={() => setShowContextSwitchModal(false)} />}
       {showEntryTicketModal && <EntryTicketModal topic={startConfigCache?.tag} lastFrictionNote={topicsMetadata[startConfigCache?.tag]?.lastFrictionNote} lastSessionEndState={topicsMetadata[startConfigCache?.tag]?.lastSessionEndState} onSubmit={handleEntryTicketSubmit} />}

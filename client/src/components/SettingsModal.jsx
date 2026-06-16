@@ -13,7 +13,8 @@ export default function SettingsModal({ onClose, onSave }) {
     enabledVisualizations: { sfi: true, timeByTag: true, timeOfDay: true, heatmap: true, stressEnergy: true, timeFocused: true, tagPie: true },
     enableEpistemicTracking: false,
     enableInterleaving: false,
-    cognitiveExpenditureLimit: 100
+    cognitiveExpenditureLimit: 100,
+    logRetentionDays: 7
   });
   const [tags, setTags] = useState([]);
   const [newMasterTag, setNewMasterTag] = useState('');
@@ -65,7 +66,8 @@ export default function SettingsModal({ onClose, onSave }) {
           cognitiveExpenditureLimit: config.cognitiveExpenditureLimit,
           showDailySectorChartOnTimer: config.showDailySectorChartOnTimer,
           backgroundImage: config.backgroundImage,
-          customBackgroundImage: config.customBackgroundImage
+          customBackgroundImage: config.customBackgroundImage,
+          logRetentionDays: config.logRetentionDays
         })
       });
       document.documentElement.setAttribute('data-theme', config.theme);
@@ -196,6 +198,19 @@ export default function SettingsModal({ onClose, onSave }) {
                   <hr style={{ borderTop: '1px solid var(--md-sys-color-outline)', margin: '24px 0', opacity: 0.2 }} />
 
                   <h3 style={{ marginBottom: '16px' }}>Data Management</h3>
+                  
+                  <div className="form-group" style={{ marginBottom: '16px' }}>
+                    <label>Log Retention (Days)</label>
+                    <input 
+                      type="number" 
+                      className="md-input" 
+                      value={config.logRetentionDays ?? 7} 
+                      onChange={e => setConfig({...config, logRetentionDays: parseInt(e.target.value) || 7})}
+                      min="1"
+                    />
+                    <small style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>Logs older than this will be automatically deleted to save space.</small>
+                  </div>
+
                   <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                     <button 
                       type="button" 

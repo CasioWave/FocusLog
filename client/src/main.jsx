@@ -1,7 +1,10 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
+import { initLogger } from './utils/logger.js';
 import './index.css'
+
+initLogger();
 
 const originalFetch = window.fetch;
 window.fetch = async (...args) => {

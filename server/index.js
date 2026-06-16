@@ -12,6 +12,41 @@ const io = new Server(server, { cors: { origin: '*' } });
 app.use(cors());
 app.use(express.json());
 
+const LOGS_DIR = path.join(__dirname, '..', 'Logs');
+if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
+const getLogFile = () => path.join(LOGS_DIR, `focuslog-${new Date().toISOString().split('T')[0]}.log`);
+
+const originalConsoleLog = console.log;
+const originalConsoleWarn = console.warn;
+const originalConsoleError = console.error;
+
+const writeLog = (level, ...args) => {
+  let msg = '';
+  try {
+    msg = `[${new Date().toISOString()}] [SERVER] [${level}] ` + args.map(a => {
+      if (a instanceof Error) return a.stack || a.toString();
+      if (typeof a === 'object') return JSON.stringify(a);
+      return a;
+    }).join(' ') + '\n';
+  } catch(e) {
+    msg = `[${new Date().toISOString()}] [SERVER] [${level}] [Error serializing log]\n`;
+  }
+  fs.appendFileSync(getLogFile(), msg);
+};
+
+console.log = (...args) => {
+  writeLog('INFO', ...args);
+  originalConsoleLog(...args);
+};
+console.warn = (...args) => {
+  writeLog('WARN', ...args);
+  originalConsoleWarn(...args);
+};
+console.error = (...args) => {
+  writeLog('ERROR', ...args);
+  originalConsoleError(...args);
+};
+
 const configPath = path.join(__dirname, 'config.json');
 
 const readConfig = () => {
@@ -36,7 +71,8 @@ const readConfig = () => {
       showGoalsOnTimer: true,
       enabledVisualizations: { sfi: true, timeByTag: true, timeOfDay: true, heatmap: true, stressEnergy: true, timeFocused: true, tagPie: true },
       enableEpistemicTracking: false,
-      enableInterleaving: false
+      enableInterleaving: false,
+      logRetentionDays: 7
     }, null, 2));
   }
   return JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -80,6 +116,41 @@ const ensureDataExists = () => {
   }
 };
 ensureDataExists();
+
+const cleanupOldLogs = () => {
+  try {
+    const conf = readConfig();
+    const retentionDays = conf.logRetentionDays ?? 7;
+    if (retentionDays <= 0) return; // Keep forever if <= 0
+
+    if (!fs.existsSync(LOGS_DIR)) return;
+    const files = fs.readdirSync(LOGS_DIR);
+    const now = Date.now();
+    const msPerDay = 24 * 60 * 60 * 1000;
+
+    let deletedCount = 0;
+    files.forEach(file => {
+      if (file.startsWith('focuslog-') && file.endsWith('.log')) {
+        const filePath = path.join(LOGS_DIR, file);
+        const stats = fs.statSync(filePath);
+        const ageDays = (now - stats.mtime.getTime()) / msPerDay;
+        if (ageDays > retentionDays) {
+          fs.unlinkSync(filePath);
+          deletedCount++;
+        }
+      }
+    });
+    if (deletedCount > 0) {
+      console.log(`[CLEANUP] Deleted ${deletedCount} old log file(s).`);
+    }
+  } catch (err) {
+    console.error("[SERVER] [ERROR] Failed during log cleanup:", err);
+  }
+};
+
+// Run cleanup immediately on startup, and every 24 hours
+cleanupOldLogs();
+setInterval(cleanupOldLogs, 24 * 60 * 60 * 1000);
 
 // Helper to read data
 const readData = () => {
@@ -226,6 +297,17 @@ io.on('connection', (socket) => {
 });
 
 // Routes
+app.post('/api/logs', (req, res) => {
+  const { logs } = req.body;
+  if (Array.isArray(logs)) {
+    logs.forEach(log => {
+      const msg = `[${log.timestamp}] [CLIENT] [${log.level}] ${log.message}\n`;
+      fs.appendFileSync(getLogFile(), msg);
+    });
+  }
+  res.json({ success: true });
+});
+
 app.get('/api/data', authMiddleware, (req, res) => {
   res.json(readData());
 });

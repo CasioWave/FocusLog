@@ -7,7 +7,12 @@ export default function PostSessionModal({ onSave }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSave(notes, breakDuration);
+    console.log("[PostSessionModal] Submit clicked", { notes, breakDuration });
+    try {
+      onSave(notes, breakDuration);
+    } catch(err) {
+      console.error("[PostSessionModal] Error calling onSave:", err);
+    }
   };
 
   return (
