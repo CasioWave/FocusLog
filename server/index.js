@@ -392,6 +392,10 @@ app.post('/api/tags', authMiddleware, (req, res) => {
   const { tag } = req.body;
   if (tag && !data.tags.includes(tag)) {
     data.tags.push(tag);
+    if (!data.topics) data.topics = {};
+    if (!data.topics[tag]) {
+      data.topics[tag] = { topicId: tag, parentDomain: "Uncategorized", lastStudied: null, historicalTau: 25, averageFrictionRate: 0, lastSessionEndState: null, lastFrictionNote: null };
+    }
     writeData(data);
   }
   res.json({ success: true, tags: data.tags });
@@ -430,13 +434,18 @@ app.post('/api/settings', authMiddleware, (req, res) => {
   writeConfig(newConf);
   ensureDataExists(); // Create if new path
   
-  // Bug fix: Sync tags from targets to data.tags
+  // If user updated tagTargets, we might need to sync it to data.tags just in case
   if (newConf.tagTargets) {
     const data = readData();
     let updated = false;
+    if (!data.topics) data.topics = {};
     Object.keys(newConf.tagTargets).forEach(tag => {
       if (!data.tags.includes(tag)) {
         data.tags.push(tag);
+        updated = true;
+      }
+      if (!data.topics[tag]) {
+        data.topics[tag] = { topicId: tag, parentDomain: "Uncategorized", lastStudied: null, historicalTau: 25, averageFrictionRate: 0, lastSessionEndState: null, lastFrictionNote: null };
         updated = true;
       }
     });

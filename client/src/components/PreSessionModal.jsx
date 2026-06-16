@@ -14,11 +14,7 @@ export default function PreSessionModal({ onStart, onCancel, config }) {
     fetch('/api/data')
       .then(res => res.json())
       .then(data => {
-        if (data.topics && Object.keys(data.topics).length > 0) {
-          const keys = Object.keys(data.topics);
-          setTags(keys);
-          setSelectedTag(keys[0]);
-        } else if (data.tags) {
+        if (data.tags) {
           setTags(data.tags);
           if (data.tags.length > 0) setSelectedTag(data.tags[0]);
         }
