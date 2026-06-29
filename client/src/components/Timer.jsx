@@ -7,7 +7,7 @@ import FrictionModal from './FrictionModal';
 import ContextSwitchModal from './ContextSwitchModal';
 import EntryTicketModal from './EntryTicketModal';
 import { audioController } from '../utils/AudioController';
-import { calculateFatigueCurve, calculateEnduranceConstants, calculateInterleavingQueue } from '../utils/AnalyticsEngine';
+import { calculateFatigueCurve, calculateEnduranceConstants, calculateInterleavingQueue, calculateFocusTrend } from '../utils/AnalyticsEngine';
 import { io } from 'socket.io-client';
 import Heatmap from './Heatmap';
 import DailySectorChart from './DailySectorChart';
@@ -83,9 +83,12 @@ export default function Timer({ refreshKey }) {
   const [todaysData, setTodaysData] = useState({ totalTime: 0, tagsTime: {} });
   const [weeklyData, setWeeklyData] = useState({ totalTime: 0, consistency: 0 });
   const [bestStats, setBestStats] = useState({ bestSFI: 0, longestSession: 0, bestDaily: 0 });
+  const [infographicsData, setInfographicsData] = useState(null);
   const [peakBin, setPeakBin] = useState(null);
   const [enduranceLimit, setEnduranceLimit] = useState(25);
   const [smartBreakPrompted, setSmartBreakPrompted] = useState(false);
+  const [flowPushPrompted, setFlowPushPrompted] = useState(false);
+  const [flowAchievedPrompted, setFlowAchievedPrompted] = useState(false);
   const [showSmartToast, setShowSmartToast] = useState(false);
   const [allSessions, setAllSessions] = useState([]);
   const [finishingDevice, setFinishingDevice] = useState(null);
@@ -160,6 +163,27 @@ export default function Timer({ refreshKey }) {
       });
 
       const { peakBin, enduranceLimit } = calculateFatigueCurve(allData.sessions);
+      const focusTrend = calculateFocusTrend(allData.sessions);
+
+      const yesterday = new Date(todayDate);
+      yesterday.setDate(todayDate.getDate() - 1);
+      const yesterdayStr = getLocalDate(yesterday.toISOString());
+      const yesterdayTotal = dailyTotals[yesterdayStr] || 0;
+      const activeDaysCount = Object.keys(dailyTotals).length || 1;
+      const allTimeTotal = Object.values(dailyTotals).reduce((a,b) => a+b, 0);
+      const dailyAverage = allTimeTotal / activeDaysCount;
+
+      const pctMoreThanAverage = dailyAverage > 0 ? ((todayTotal - dailyAverage) / dailyAverage) * 100 : 0;
+      const pctMoreThanYesterday = yesterdayTotal > 0 ? ((todayTotal - yesterdayTotal) / yesterdayTotal) * 100 : (todayTotal > 0 ? 100 : 0);
+
+      setInfographicsData({
+        pctMoreThanAverage,
+        pctMoreThanYesterday,
+        yesterdayTotal,
+        dailyAverage,
+        trend: focusTrend.trend,
+        slope: focusTrend.slope
+      });
 
       setTodaysData({ totalTime: todayTotal, tagsTime: tagsTotal });
       setWeeklyData({ totalTime: weekTotal, consistency: consistencyWeeksMet });
@@ -289,9 +313,12 @@ export default function Timer({ refreshKey }) {
   };
 
   useEffect(() => {
-    if (sessionState === 'running' && config.smartBreakPrompts && !smartBreakPrompted && allSessions.length >= 3) {
+    if (sessionState !== 'running' || allSessions.length < 3) return;
+
+    const strategy = config.enduranceStrategy || (config.smartBreakPrompts ? 'preemptive_breaks' : 'none');
+    
+    if (strategy === 'preemptive_breaks' && !smartBreakPrompted) {
       const promptMinute = Math.max(5, Math.floor(enduranceLimit) - 5);
-      
       if (Math.floor(timeElapsed / 60) === promptMinute) {
         setSmartBreakPrompted(true);
         setSmartToastMsg("Your focus usually drops soon. Preemptive 5 min break?");
@@ -301,8 +328,29 @@ export default function Timer({ refreshKey }) {
         }
         setTimeout(() => setShowSmartToast(false), 10000);
       }
+    } else if (strategy === 'flow_scaffolding') {
+      const cliffMinute = Math.floor(enduranceLimit);
+      const currentMinute = Math.floor(timeElapsed / 60);
+      
+      if (!flowPushPrompted && currentMinute === cliffMinute) {
+        setFlowPushPrompted(true);
+        setSmartToastMsg(`🔥 Entering Flow Push Zone! You usually drop focus here. Push through for 5 more minutes!`);
+        setShowSmartToast(true);
+        if ("Notification" in window && Notification.permission === "granted") {
+           new Notification("Flow Push Zone", { body: `You usually drop focus here. Push through for 5 more minutes!` });
+        }
+        setTimeout(() => setShowSmartToast(false), 10000);
+      } else if (!flowAchievedPrompted && currentMinute === cliffMinute + 5) {
+        setFlowAchievedPrompted(true);
+        setSmartToastMsg(`🌊 Flow Achieved! You've successfully pushed past your historical limit.`);
+        setShowSmartToast(true);
+        if ("Notification" in window && Notification.permission === "granted") {
+           new Notification("Flow Achieved", { body: `You've successfully pushed past your historical limit.` });
+        }
+        setTimeout(() => setShowSmartToast(false), 10000);
+      }
     }
-  }, [timeElapsed, sessionState, config.smartBreakPrompts, enduranceLimit, smartBreakPrompted]);
+  }, [timeElapsed, sessionState, config.smartBreakPrompts, config.enduranceStrategy, enduranceLimit, smartBreakPrompted, flowPushPrompted, flowAchievedPrompted, allSessions.length]);
 
   useEffect(() => {
     if (sessionState === 'running' && config.enableEpistemicTracking && currentTau && allSessions.length >= 3) {
@@ -392,6 +440,8 @@ export default function Timer({ refreshKey }) {
 
   const executeStart = (startConfig, latency) => {
     setSmartBreakPrompted(false);
+    setFlowPushPrompted(false);
+    setFlowAchievedPrompted(false);
     setDecayWarningTriggered(false);
     setCognitiveExpenditure(0);
     setEntryTicketLatency(latency);
@@ -417,8 +467,9 @@ export default function Timer({ refreshKey }) {
       setInterleavingQueue(queue);
     }
     
-    if (audioMode === 'interval') audioController.startIntervalBell(intervalMins);
-    if (audioMode === 'random') audioController.startRandomBell(randomMin, randomMax);
+    if (startConfig.audioMode === 'interval') audioController.startIntervalBell(startConfig.intervalMins || 5);
+    if (startConfig.audioMode === 'random') audioController.startRandomBell(startConfig.randomMin || 5, startConfig.randomMax || 15);
+    if (startConfig.audioMode === 'off') audioController.stopBell();
     
     socketRef.current.emit('startSession', { ...startConfig, deviceId: getDeviceId() });
   };
@@ -701,6 +752,12 @@ export default function Timer({ refreshKey }) {
           </div>
         )}
 
+        {sessionState === 'running' && (config.enduranceStrategy === 'flow_scaffolding') && (Math.floor(timeElapsed / 60) >= Math.floor(enduranceLimit)) && (Math.floor(timeElapsed / 60) < Math.floor(enduranceLimit) + 5) && (
+           <div style={{ marginBottom: '16px', color: '#ff5722', fontWeight: 'bold', fontSize: '1.2rem', textTransform: 'uppercase', letterSpacing: '2px', display: 'flex', alignItems: 'center', gap: '8px', animation: 'pulse 2s infinite' }}>
+             🔥 FLOW PUSH ZONE - Push through the friction!
+           </div>
+        )}
+
         {renderTimerVisual()}
 
         <div style={{ display: 'flex', gap: '24px', justifyContent: 'center', marginTop: '32px' }}>
@@ -794,7 +851,7 @@ export default function Timer({ refreshKey }) {
               renderProgressBar(`Tag: ${tag}`, todaysData.tagsTime[tag] || 0, target)
             )}
           </div>
-          <div style={{ flex: 1 }}>
+           <div style={{ flex: 1 }}>
              <h4 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '1px', fontSize: '0.85rem' }}><Trophy size={16}/> Best Stats</h4>
              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.9rem' }}>
                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Best Focus Score</span> <strong>{Math.round(bestStats.bestSFI)}</strong></div>
@@ -803,6 +860,33 @@ export default function Timer({ refreshKey }) {
                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Consistency</span> <strong>{weeklyData.consistency} Wks</strong></div>
              </div>
           </div>
+          
+          {infographicsData && (
+            <div style={{ flex: 1, backgroundColor: 'var(--md-sys-color-surface-variant)', padding: '16px', borderRadius: '12px' }}>
+              <h4 style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', textTransform: 'uppercase', letterSpacing: '1px', fontSize: '0.85rem', color: 'var(--md-sys-color-primary)' }}>📈 Insights</h4>
+              
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '2rem', fontWeight: 'bold', color: infographicsData.pctMoreThanAverage >= 0 ? '#4caf50' : '#f44336' }}>
+                  {infographicsData.pctMoreThanAverage >= 0 ? '+' : ''}{Math.round(infographicsData.pctMoreThanAverage)}%
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--md-sys-color-on-surface-variant)' }}>Study today vs daily average</div>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: infographicsData.pctMoreThanYesterday >= 0 ? '#4caf50' : '#f44336' }}>
+                  {infographicsData.pctMoreThanYesterday >= 0 ? '+' : ''}{Math.round(infographicsData.pctMoreThanYesterday)}%
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--md-sys-color-on-surface-variant)' }}>Compared to yesterday</div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 'bold', textTransform: 'capitalize', color: infographicsData.trend === 'improving' ? '#4caf50' : (infographicsData.trend === 'worsening' ? '#f44336' : 'var(--md-sys-color-on-surface)') }}>
+                  {infographicsData.trend}
+                </div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--md-sys-color-on-surface-variant)' }}>Long-term Focus Trend (SFI)</div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -814,7 +898,7 @@ export default function Timer({ refreshKey }) {
       )}
 
       {/* Modals */}
-      {showPreModal && <PreSessionModal onStart={handleStart} onCancel={() => setShowPreModal(false)} config={config} />}
+      {showPreModal && <PreSessionModal onStart={handleStart} onCancel={() => setShowPreModal(false)} config={config} enduranceLimit={enduranceLimit} />}
       {showDistractionModal && <DistractionModal onLog={handleDistractionLog} onCancel={() => setShowDistractionModal(false)} />}
       {showPostModal && <PostSessionModal sessionData={pendingSessionData} onSave={finalizeSession} />}
       {showFrictionModal && <FrictionModal onLog={handleFrictionLog} onCancel={() => setShowFrictionModal(false)} />}

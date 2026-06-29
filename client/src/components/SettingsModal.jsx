@@ -4,7 +4,7 @@ import { X, Save, Trash2, Plus, Palette, Bell, Target, Lock, Database, Wind, Mon
 export default function SettingsModal({ onClose, onSave }) {
   const [config, setConfig] = useState({ 
     dataPath: '', absoluteDataPath: '', dailyTargetMinutes: 240, weeklyTargetMinutes: 1200, 
-    smartBreakPrompts: true, tagTargets: {}, tagColors: {}, intervalBellPath: '', endBellPath: '', 
+    smartBreakPrompts: true, enduranceStrategy: 'preemptive_breaks', tagTargets: {}, tagColors: {}, intervalBellPath: '', endBellPath: '', 
     password: '', enableMeditation: false, meditationSoundPath: '', 
     meditationDailyTargetMinutes: 15, meditationWeeklyTargetMinutes: 60,
     meditationDailyTargetSessions: 1, meditationWeeklyTargetSessions: 3,
@@ -48,6 +48,7 @@ export default function SettingsModal({ onClose, onSave }) {
           endBellPath: config.endBellPath,
           weeklyTargetMinutes: config.weeklyTargetMinutes,
           smartBreakPrompts: config.smartBreakPrompts,
+          enduranceStrategy: config.enduranceStrategy || (config.smartBreakPrompts ? 'preemptive_breaks' : 'none'),
           tagColors: config.tagColors,
           password: config.password,
           enableMeditation: config.enableMeditation,
@@ -186,13 +187,22 @@ export default function SettingsModal({ onClose, onSave }) {
                     />
                   </div>
 
-                  <div className="form-group" style={{ marginTop: '24px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <input 
-                      type="checkbox" 
-                      checked={config.smartBreakPrompts} 
-                      onChange={e => setConfig({...config, smartBreakPrompts: e.target.checked})}
-                    />
-                    <label style={{ margin: 0 }}>Enable Smart Break Prompts</label>
+                  <div className="form-group" style={{ marginTop: '24px' }}>
+                    <label>Cognitive Endurance Strategy</label>
+                    <select 
+                      className="md-input"
+                      value={config.enduranceStrategy || (config.smartBreakPrompts ? 'preemptive_breaks' : 'none')}
+                      onChange={e => setConfig({...config, enduranceStrategy: e.target.value, smartBreakPrompts: e.target.value === 'preemptive_breaks'})}
+                    >
+                      <option value="none">None</option>
+                      <option value="preemptive_breaks">Preemptive Breaks (Classic)</option>
+                      <option value="flow_scaffolding">Flow Scaffolding (Focus Training)</option>
+                    </select>
+                    <small style={{ color: 'var(--md-sys-color-on-surface-variant)', display: 'block', marginTop: '4px' }}>
+                      {(config.enduranceStrategy || (config.smartBreakPrompts ? 'preemptive_breaks' : 'none')) === 'flow_scaffolding' 
+                        ? 'Actively pushes you past your historical cognitive cliffs to build focus resilience.' 
+                        : 'Prompts you to take a break 5 minutes before you historically lose focus.'}
+                    </small>
                   </div>
 
                   <hr style={{ borderTop: '1px solid var(--md-sys-color-outline)', margin: '24px 0', opacity: 0.2 }} />
@@ -612,25 +622,57 @@ export default function SettingsModal({ onClose, onSave }) {
                 <div className="timer-active-card">
                   <h3 style={{ marginBottom: '16px' }}>Focus Audio</h3>
                   <div className="form-group">
-                    <label>Interval Bell Audio (Absolute Path to MP3)</label>
-                    <input 
-                      type="text" 
-                      className="md-input" 
-                      placeholder="Leave blank for default synthetic bell"
-                      value={config.intervalBellPath || ''} 
-                      onChange={e => setConfig({ ...config, intervalBellPath: e.target.value })}
-                    />
+                    <label>Interval Bell Audio</label>
+                    <select 
+                      className="md-input"
+                      value={["", "/home/sdiptanuj/Tech/FocusLog/sound/bell.mp3", "/home/sdiptanuj/Tech/FocusLog/sound/gong_interval.wav"].includes(config.intervalBellPath) ? config.intervalBellPath : "custom"}
+                      onChange={e => {
+                         if (e.target.value !== 'custom') setConfig({...config, intervalBellPath: e.target.value});
+                         else setConfig({...config, intervalBellPath: 'custom'});
+                      }}
+                    >
+                      <option value="">Default Synthesized Bell</option>
+                      <option value="/home/sdiptanuj/Tech/FocusLog/sound/bell.mp3">Classic Bell</option>
+                      <option value="/home/sdiptanuj/Tech/FocusLog/sound/gong_interval.wav">Gentle Interval Gong</option>
+                      <option value="custom">Custom Absolute Path...</option>
+                    </select>
+                    {(!["", "/home/sdiptanuj/Tech/FocusLog/sound/bell.mp3", "/home/sdiptanuj/Tech/FocusLog/sound/gong_interval.wav"].includes(config.intervalBellPath) || config.intervalBellPath === 'custom') && (
+                      <input 
+                        type="text" 
+                        className="md-input" 
+                        style={{ marginTop: '8px' }}
+                        placeholder="/absolute/path/to/sound.mp3"
+                        value={config.intervalBellPath === 'custom' ? '' : (config.intervalBellPath || '')} 
+                        onChange={e => setConfig({ ...config, intervalBellPath: e.target.value })}
+                      />
+                    )}
                   </div>
 
                   <div className="form-group" style={{ marginTop: '16px', marginBottom: '32px' }}>
                     <label>Timer End Notification Audio</label>
-                    <input 
-                      type="text" 
-                      className="md-input" 
-                      placeholder="Leave blank for default synthetic bell"
-                      value={config.endBellPath || ''} 
-                      onChange={e => setConfig({ ...config, endBellPath: e.target.value })}
-                    />
+                    <select 
+                      className="md-input"
+                      value={["", "/home/sdiptanuj/Tech/FocusLog/sound/end.mp3", "/home/sdiptanuj/Tech/FocusLog/sound/gong_end.wav"].includes(config.endBellPath) ? config.endBellPath : "custom"}
+                      onChange={e => {
+                         if (e.target.value !== 'custom') setConfig({...config, endBellPath: e.target.value});
+                         else setConfig({...config, endBellPath: 'custom'});
+                      }}
+                    >
+                      <option value="">Default Synthesized Bell</option>
+                      <option value="/home/sdiptanuj/Tech/FocusLog/sound/end.mp3">Classic End Bell</option>
+                      <option value="/home/sdiptanuj/Tech/FocusLog/sound/gong_end.wav">Deep End Gong</option>
+                      <option value="custom">Custom Absolute Path...</option>
+                    </select>
+                    {(!["", "/home/sdiptanuj/Tech/FocusLog/sound/end.mp3", "/home/sdiptanuj/Tech/FocusLog/sound/gong_end.wav"].includes(config.endBellPath) || config.endBellPath === 'custom') && (
+                      <input 
+                        type="text" 
+                        className="md-input" 
+                        style={{ marginTop: '8px' }}
+                        placeholder="/absolute/path/to/sound.mp3"
+                        value={config.endBellPath === 'custom' ? '' : (config.endBellPath || '')} 
+                        onChange={e => setConfig({ ...config, endBellPath: e.target.value })}
+                      />
+                    )}
                   </div>
 
                   <hr style={{ borderTop: '1px solid var(--md-sys-color-outline)', margin: '24px 0', opacity: 0.2 }} />

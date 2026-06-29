@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-export default function PreSessionModal({ onStart, onCancel, config }) {
+export default function PreSessionModal({ onStart, onCancel, config, enduranceLimit }) {
   const [goal, setGoal] = useState('');
   const [stance, setStance] = useState('INGESTION');
   const [type, setType] = useState('countdown'); // 'countdown' | 'infinite'
@@ -9,6 +9,10 @@ export default function PreSessionModal({ onStart, onCancel, config }) {
   const [selectedTag, setSelectedTag] = useState('');
   const [energy, setEnergy] = useState(3);
   const [stress, setStress] = useState(3);
+  const [audioMode, setAudioMode] = useState('interval'); // 'off' | 'interval' | 'random'
+  const [intervalMins, setIntervalMins] = useState(5);
+  const [randomMin, setRandomMin] = useState(5);
+  const [randomMax, setRandomMax] = useState(15);
 
   useEffect(() => {
     fetch('/api/data')
@@ -35,7 +39,11 @@ export default function PreSessionModal({ onStart, onCancel, config }) {
       tag: selectedTag,
       energy,
       stress,
-      stance: config?.enableEpistemicTracking ? stance : null
+      stance: config?.enableEpistemicTracking ? stance : null,
+      audioMode,
+      intervalMins,
+      randomMin,
+      randomMax
     });
   };
 
@@ -99,13 +107,27 @@ export default function PreSessionModal({ onStart, onCancel, config }) {
           {type === 'countdown' && (
             <div className="form-group">
               <label>Duration (minutes)</label>
-              <input 
-                type="number" 
-                min="1" 
-                value={duration} 
-                onChange={e => setDuration(parseInt(e.target.value))}
-                className="md-input"
-              />
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input 
+                  type="number" 
+                  min="1" 
+                  value={duration} 
+                  onChange={e => setDuration(parseInt(e.target.value))}
+                  className="md-input"
+                  style={{ flex: 1 }}
+                />
+                {enduranceLimit > 0 && config?.enduranceStrategy === 'flow_scaffolding' && (
+                  <button 
+                    type="button" 
+                    className="md-button md-button-secondary" 
+                    onClick={() => setDuration(Math.ceil(enduranceLimit * 1.1))}
+                    title={`Your historical cliff is ~${Math.floor(enduranceLimit)}m. Push +10% to build flow resilience.`}
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    🧠 Scaffold Target ({Math.ceil(enduranceLimit * 1.1)}m)
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -140,6 +162,57 @@ export default function PreSessionModal({ onStart, onCancel, config }) {
               </div>
             </div>
           </div>
+
+          <div className="form-group" style={{ marginTop: '16px' }}>
+            <label>Audio Interval Bells</label>
+            <select 
+              value={audioMode} 
+              onChange={e => setAudioMode(e.target.value)}
+              className="md-input"
+            >
+              <option value="off">Off</option>
+              <option value="interval">Regular Intervals</option>
+              <option value="random">Random Intervals</option>
+            </select>
+          </div>
+
+          {audioMode === 'interval' && (
+            <div className="form-group" style={{ marginTop: '8px' }}>
+              <label>Interval (minutes)</label>
+              <input 
+                type="number" 
+                min="1" 
+                value={intervalMins} 
+                onChange={e => setIntervalMins(parseInt(e.target.value) || 1)}
+                className="md-input"
+              />
+            </div>
+          )}
+
+          {audioMode === 'random' && (
+            <div style={{ display: 'flex', gap: '24px', marginTop: '8px' }}>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>Min Interval (mins)</label>
+                <input 
+                  type="number" 
+                  min="1" 
+                  value={randomMin} 
+                  onChange={e => setRandomMin(parseInt(e.target.value) || 1)}
+                  className="md-input"
+                />
+              </div>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>Max Interval (mins)</label>
+                <input 
+                  type="number" 
+                  min="2" 
+                  value={randomMax} 
+                  onChange={e => setRandomMax(parseInt(e.target.value) || 2)}
+                  className="md-input"
+                />
+              </div>
+            </div>
+          )}
 
           {config?.enableEpistemicTracking && (
             <div className="form-group" style={{ marginTop: '16px' }}>

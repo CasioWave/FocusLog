@@ -4,6 +4,7 @@ import { io } from 'socket.io-client';
 import NoiseGenerator from '../utils/NoiseGenerator';
 import Heatmap from './Heatmap';
 import { getDeviceId } from '../utils/deviceId';
+import { audioController } from '../utils/AudioController';
 
 const socket = io('/', {
   auth: { password: localStorage.getItem('focuslog_password') || '' }
@@ -89,12 +90,12 @@ export default function MeditationTimer({ refreshKey, config }) {
            const gongSecs = globalState.sessionData.gongInterval * 60;
            if (diff % gongSecs === 0 && diff !== nextGongTimeRef.current) {
              nextGongTimeRef.current = diff;
-             if (localAudioEnabled) NoiseGenerator.playSyntheticGong(440, 'triangle');
+             if (localAudioEnabled) audioController.playBell(false);
            }
         }
 
         if (diff >= expectedSecs) {
-          if (localAudioEnabled) NoiseGenerator.playSyntheticGong(220, 'sine'); // End bell
+          if (localAudioEnabled) audioController.playBell(true); // End bell
           socket.emit('stopEarly', { deviceId: getDeviceId() }); // Actually just ends it
         }
       }, 1000);
